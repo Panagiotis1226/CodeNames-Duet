@@ -36,6 +36,7 @@ lerna-debug.log*
 firestore.rules
 firestore.indexes.json
 storage.rules
+firebase.ts
 
 # Testing
 coverage/
