@@ -4,10 +4,20 @@ import { signInAnonymously } from 'firebase/auth';
 
 const app = document.getElementById('app')!;
 
+// Store current lobby listener for cleanup
+let currentLobbyUnsubscribe: (() => void) | null = null;
+let currentLobbyId: string | null = null;
+
 // Initialize anonymous auth
 async function initAuth() {
   try {
-    await signInAnonymously(auth);
+    // Check if we already have a user
+    if (auth.currentUser) {
+      console.log('Already authenticated:', auth.currentUser.uid);
+      return;
+    }
+    const result = await signInAnonymously(auth);
+    console.log('New anonymous auth:', result.user.uid);
   } catch (error) {
     console.error('Auth error:', error);
   }
@@ -51,47 +61,23 @@ function renderHomePage() {
 
 // Create a new lobby
 async function createLobby() {
-  const user = auth.currentUser;
+  // Show lobby page immediately with loading state
+  const lobbyCode = generateLobbyCode();
+  let user = auth.currentUser;
+
   if (!user) {
-    // Show lobby page immediately with loading state
-    const lobbyCode = generateLobbyCode();
-    renderLobbyPage(lobbyCode, true);
-
-    // Wait for auth then create in background
     await initAuth();
-    const newUser = auth.currentUser;
-    if (!newUser) {
-      alert('Authentication failed. Please refresh.');
-      return;
-    }
+    user = auth.currentUser;
+  }
 
-    try {
-      await addDoc(collection(db, 'lobbies'), {
-        code: lobbyCode,
-        hostId: newUser.uid,
-        players: [{
-          id: newUser.uid,
-          name: 'Player 1',
-          isHost: true,
-          role: null
-        }],
-        status: 'waiting',
-        createdAt: new Date()
-      });
-      // Update UI to show lobby is ready
-      updateLobbyStatus('ready');
-    } catch (error) {
-      console.error('Error creating lobby:', error);
-      alert('Failed to create lobby. Please try again.');
-      renderHomePage();
-    }
+  if (!user) {
+    alert('Authentication failed. Please refresh.');
+    renderHomePage();
     return;
   }
 
-  const lobbyCode = generateLobbyCode();
-
   try {
-    await addDoc(collection(db, 'lobbies'), {
+    const docRef = await addDoc(collection(db, 'lobbies'), {
       code: lobbyCode,
       hostId: user.uid,
       players: [{
@@ -104,27 +90,165 @@ async function createLobby() {
       createdAt: new Date()
     });
 
-    renderLobbyPage(lobbyCode, false);
+    currentLobbyId = docRef.id;
+    // Start listening for updates
+    listenToLobby(docRef.id);
   } catch (error) {
     console.error('Error creating lobby:', error);
     alert('Failed to create lobby. Please try again.');
+    renderHomePage();
   }
 }
 
 // Join an existing lobby
 async function joinLobby(code: string) {
-  const user = auth.currentUser;
-  if (!user) {
-    alert('Please wait, authenticating...');
-    return;
+  // Show joining state immediately
+  const joinBtn = document.getElementById('joinLobbyBtn') as HTMLButtonElement;
+  if (joinBtn) {
+    joinBtn.textContent = 'Joining...';
+    joinBtn.disabled = true;
   }
 
-  // TODO: Implement join lobby logic in next step
-  console.log('Joining lobby:', code);
+  // Ensure auth
+  let user = auth.currentUser;
+  if (!user) {
+    await initAuth();
+    user = auth.currentUser;
+    if (!user) {
+      alert('Authentication failed. Please try again.');
+      if (joinBtn) {
+        joinBtn.textContent = 'Join Lobby';
+        joinBtn.disabled = false;
+      }
+      return;
+    }
+  }
+
+  try {
+    // Find lobby by code
+    const { getDocs, query, where } = await import('firebase/firestore');
+    const q = query(collection(db, 'lobbies'), where('code', '==', code));
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      alert('Lobby not found. Please check the code and try again.');
+      if (joinBtn) {
+        joinBtn.textContent = 'Join Lobby';
+        joinBtn.disabled = false;
+      }
+      return;
+    }
+
+    const lobbyDoc = snapshot.docs[0];
+    const lobbyData = lobbyDoc.data();
+
+    // Check if lobby is full (max 2 players for Duet)
+    if (lobbyData.players && lobbyData.players.length >= 2) {
+      alert('This lobby is full.');
+      if (joinBtn) {
+        joinBtn.textContent = 'Join Lobby';
+        joinBtn.disabled = false;
+      }
+      return;
+    }
+
+    // Check if user is already in lobby
+    const alreadyInLobby = lobbyData.players?.some((p: { id: string }) => p.id === user.uid);
+    if (alreadyInLobby) {
+      // Just navigate to lobby and start listening
+      currentLobbyId = lobbyDoc.id;
+      listenToLobby(lobbyDoc.id);
+      return;
+    }
+
+    // Add player to lobby
+    const newPlayer = {
+      id: user.uid,
+      name: `Player ${lobbyData.players?.length + 1 || 2}`,
+      isHost: false,
+      role: null
+    };
+
+    await updateDoc(doc(db, 'lobbies', lobbyDoc.id), {
+      players: [...(lobbyData.players || []), newPlayer]
+    });
+
+    // Navigate to lobby and start listening
+    currentLobbyId = lobbyDoc.id;
+    listenToLobby(lobbyDoc.id);
+
+  } catch (error) {
+    console.error('Error joining lobby:', error);
+    alert('Failed to join lobby. Please try again.');
+    if (joinBtn) {
+      joinBtn.textContent = 'Join Lobby';
+      joinBtn.disabled = false;
+    }
+  }
 }
 
-// Render lobby page
-function renderLobbyPage(lobbyCode: string, isLoading: boolean) {
+// Listen to lobby updates
+function listenToLobby(lobbyId: string) {
+  // Clean up previous listener
+  if (currentLobbyUnsubscribe) {
+    currentLobbyUnsubscribe();
+  }
+
+  currentLobbyUnsubscribe = onSnapshot(doc(db, 'lobbies', lobbyId), (snapshot) => {
+    if (!snapshot.exists()) {
+      alert('Lobby was closed.');
+      renderHomePage();
+      return;
+    }
+
+    const lobbyData = snapshot.data();
+    const currentUser = auth.currentUser;
+
+    console.log('Lobby update:', {
+      lobbyId: snapshot.id,
+      hostId: lobbyData.hostId,
+      currentUserId: currentUser?.uid,
+      players: lobbyData.players,
+      isHost: lobbyData.hostId === currentUser?.uid
+    });
+
+    if (!currentUser) return;
+
+    // Check if this user is the host
+    const isHost = lobbyData.hostId === currentUser.uid;
+
+    // Render appropriate lobby view
+    if (isHost) {
+      renderHostLobbyPage(lobbyData.code, lobbyData);
+    } else {
+      renderPlayerLobbyPage(lobbyData.code, lobbyData);
+    }
+  });
+}
+
+// Render host lobby page with real-time updates
+function renderHostLobbyPage(lobbyCode: string, lobbyData: any) {
+  const players = lobbyData.players || [];
+  const currentUser = auth.currentUser;
+
+  const playersHtml = players.map((p: { id: string; name: string; isHost: boolean }) => {
+    const isCurrentUser = p.id === currentUser?.uid;
+    const nameEditHtml = isCurrentUser ?
+      `<input type="text" class="name-edit-input" id="nameInput" value="${p.name}" maxlength="15">
+       <button class="edit-name-btn" id="saveNameBtn">Save</button>` :
+      `<span>${p.name}</span>`;
+    return `
+      <div class="player-item" data-player-id="${p.id}">
+        ${nameEditHtml}
+        ${isCurrentUser ? '(You)' : ''}
+        ${p.isHost ? '<span class="player-host">Host</span>' : ''}
+      </div>
+    `;
+  }).join('');
+
+  const waitingSlot = players.length < 2 ?
+    '<div class="player-item" style="opacity: 0.5;"><span>Waiting for player...</span></div>' : '';
+
   app.innerHTML = `
     <h1 class="home-title">LOBBY</h1>
     <p class="home-subtitle">Share this code with your partner</p>
@@ -137,13 +261,8 @@ function renderLobbyPage(lobbyCode: string, isLoading: boolean) {
     <div class="players-section">
       <h3>Players</h3>
       <div id="playersList">
-        <div class="player-item">
-          <span>Player 1</span>
-          <span class="player-host">Host</span>
-        </div>
-        <div class="player-item" style="opacity: 0.5;">
-          <span>Waiting for player...</span>
-        </div>
+        ${playersHtml}
+        ${waitingSlot}
       </div>
     </div>
 
@@ -159,11 +278,9 @@ function renderLobbyPage(lobbyCode: string, isLoading: boolean) {
       </div>
     </div>
 
-    <button id="startGameBtn" class="btn btn-primary" ${isLoading ? 'disabled' : ''}>
-      ${isLoading ? 'Creating Lobby...' : 'Start Game'}
+    <button id="startGameBtn" class="btn btn-primary" ${players.length < 2 ? 'disabled' : ''}>
+      ${players.length < 2 ? 'Waiting for Player...' : 'Start Game'}
     </button>
-
-    ${isLoading ? '<p style="color: #888; margin-top: 15px;">Setting up lobby...</p>' : ''}
   `;
 
   // Copy button functionality
@@ -181,26 +298,130 @@ function renderLobbyPage(lobbyCode: string, isLoading: boolean) {
     });
   });
 
-  // Start game placeholder
+  // Save name functionality
+  const saveNameBtn = document.getElementById('saveNameBtn');
+  const nameInput = document.getElementById('nameInput') as HTMLInputElement;
+
+  if (saveNameBtn && nameInput && currentLobbyId) {
+    saveNameBtn.addEventListener('click', async () => {
+      const newName = nameInput.value.trim();
+      if (newName && newName.length > 0 && newName.length <= 15 && currentLobbyId) {
+        try {
+          const lobbyRef = doc(db, 'lobbies', currentLobbyId);
+          const lobbySnap = await getDoc(lobbyRef);
+          if (lobbySnap.exists()) {
+            const data = lobbySnap.data();
+            const updatedPlayers = data.players.map((p: { id: string; name: string }) =>
+              p.id === currentUser?.uid ? { ...p, name: newName } : p
+            );
+            await updateDoc(lobbyRef, { players: updatedPlayers });
+          }
+        } catch (error) {
+          console.error('Error updating name:', error);
+          alert('Failed to update name. Please try again.');
+        }
+      }
+    });
+
+    // Allow Enter key to save
+    nameInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        saveNameBtn.click();
+      }
+    });
+  }
   document.getElementById('startGameBtn')?.addEventListener('click', () => {
-    if (!isLoading) {
+    if (players.length >= 2) {
       alert('Start Game - Coming soon!');
     }
   });
 }
 
-// Update lobby status
-function updateLobbyStatus(status: string) {
-  const startBtn = document.getElementById('startGameBtn') as HTMLButtonElement;
-  const statusText = document.querySelector('p[style*="#888"]');
+// Render player (non-host) lobby page with real-time updates
+function renderPlayerLobbyPage(lobbyCode: string, lobbyData: any) {
+  const players = lobbyData.players || [];
+  const currentUser = auth.currentUser;
 
-  if (startBtn && status === 'ready') {
-    startBtn.disabled = false;
-    startBtn.textContent = 'Start Game';
-  }
+  const playersHtml = players.map((p: { id: string; name: string; isHost: boolean }) => {
+    const isCurrentUser = p.id === currentUser?.uid;
+    const nameEditHtml = isCurrentUser ?
+      `<input type="text" class="name-edit-input" id="nameInput" value="${p.name}" maxlength="15">
+       <button class="edit-name-btn" id="saveNameBtn">Save</button>` :
+      `<span>${p.name}</span>`;
+    return `
+      <div class="player-item" data-player-id="${p.id}">
+        ${nameEditHtml}
+        ${isCurrentUser ? '(You)' : ''}
+        ${p.isHost ? '<span class="player-host">Host</span>' : ''}
+      </div>
+    `;
+  }).join('');
 
-  if (statusText && status === 'ready') {
-    statusText.remove();
+  const waitingSlot = players.length < 2 ?
+    '<div class="player-item" style="opacity: 0.5;"><span>Waiting for player...</span></div>' : '';
+
+  app.innerHTML = `
+    <h1 class="home-title">LOBBY</h1>
+    <p class="home-subtitle">Joined Lobby</p>
+
+    <div class="lobby-code-container">
+      <div class="lobby-code-display">${lobbyCode}</div>
+    </div>
+
+    <div class="players-section">
+      <h3>Players</h3>
+      <div id="playersList">
+        ${playersHtml}
+        ${waitingSlot}
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Game Settings</h3>
+      <div class="setting-row">
+        <span class="setting-label">Difficulty (Board Size)</span>
+        <span class="setting-placeholder">[Placeholder]</span>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Timer</span>
+        <span class="setting-placeholder">[Placeholder]</span>
+      </div>
+    </div>
+
+    <p style="color: #888; margin-top: 20px;">Waiting for host to start the game...</p>
+  `;
+
+  // Save name functionality for player view
+  const saveNameBtn = document.getElementById('saveNameBtn');
+  const nameInput = document.getElementById('nameInput') as HTMLInputElement;
+
+  if (saveNameBtn && nameInput && currentLobbyId) {
+    saveNameBtn.addEventListener('click', async () => {
+      const newName = nameInput.value.trim();
+      if (newName && newName.length > 0 && newName.length <= 15 && currentLobbyId) {
+        try {
+          const lobbyRef = doc(db, 'lobbies', currentLobbyId);
+          const lobbySnap = await getDoc(lobbyRef);
+          if (lobbySnap.exists()) {
+            const data = lobbySnap.data();
+            const updatedPlayers = data.players.map((p: { id: string; name: string }) =>
+              p.id === currentUser?.uid ? { ...p, name: newName } : p
+            );
+            await updateDoc(lobbyRef, { players: updatedPlayers });
+          }
+        } catch (error) {
+          console.error('Error updating name:', error);
+          alert('Failed to update name. Please try again.');
+        }
+      }
+    });
+
+    // Allow Enter key to save
+    nameInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        saveNameBtn.click();
+      }
+    });
   }
 }
 
