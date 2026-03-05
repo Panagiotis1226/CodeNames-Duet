@@ -43,8 +43,9 @@ src/firebase.ts
 coverage/
 .nyc_output/
 
-# Cache
-.cache/
+
+# Now it will be ignored going forward
+git status
 .parcel-cache/
 .eslintcache
 .stylelintcache
