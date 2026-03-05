@@ -37,6 +37,7 @@ firestore.rules
 firestore.indexes.json
 storage.rules
 firebase.ts
+src/firebase.ts
 
 # Testing
 coverage/
