@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Codenames Duet</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: system-ui, sans-serif; 
+      background: #1a1a2e;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    #game-container {
+      text-align: center;
+    }
+    canvas {
+      border: 2px solid #4a4a6a;
+      border-radius: 8px;
+      background: #16213e;
+    }
+    #app {
+      text-align: center;
+      width: 100%;
+      max-width: 600px;
+      padding: 20px;
+    }
+    .home-title {
+      font-size: 3rem;
+      margin-bottom: 10px;
+      color: #f4d03f;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+    }
+    .home-subtitle {
+      font-size: 1.2rem;
+      color: #bbb;
+      margin-bottom: 40px;
+    }
+    .btn {
+      display: block;
+      width: 100%;
+      max-width: 300px;
+      margin: 15px auto;
+      padding: 18px 30px;
+      font-size: 1.2rem;
+      font-weight: bold;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    .btn-secondary {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      color: white;
+    }
+    .join-section {
+      margin-top: 30px;
+      padding-top: 30px;
+      border-top: 1px solid #444;
+    }
+    .join-section h3 {
+      margin-bottom: 15px;
+      color: #ddd;
+    }
+    .input-code {
+      padding: 15px 20px;
+      font-size: 1.1rem;
+      border: 2px solid #444;
+      border-radius: 8px;
+      background: #0f0f23;
+      color: white;
+      width: 200px;
+      text-align: center;
+      text-transform: uppercase;
+    }
+    .lobby-code-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 15px;
+      margin: 20px 0;
+    }
+    .lobby-code-display {
+      font-size: 2.5rem;
+      font-weight: bold;
+      letter-spacing: 8px;
+      color: #f4d03f;
+      background: #0f0f23;
+      padding: 15px 30px;
+      border-radius: 10px;
+      border: 2px solid #444;
+    }
+    .copy-btn {
+      padding: 12px 20px;
+      font-size: 1rem;
+      background: #444;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .copy-btn:hover {
+      background: #555;
+    }
+    .copy-btn.copied {
+      background: #27ae60;
+    }
+    .settings-section {
+      background: #0f0f23;
+      border-radius: 15px;
+      padding: 25px;
+      margin: 30px 0;
+      text-align: left;
+    }
+    .settings-section h3 {
+      color: #f4d03f;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px 0;
+      border-bottom: 1px solid #333;
+    }
+    .setting-row:last-child {
+      border-bottom: none;
+    }
+    .setting-label {
+      font-size: 1.1rem;
+      color: #ddd;
+    }
+    .setting-placeholder {
+      color: #888;
+      font-style: italic;
+    }
+    .players-section {
+      background: #0f0f23;
+      border-radius: 15px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .players-section h3 {
+      color: #f4d03f;
+      margin-bottom: 15px;
+    }
+    .player-item {
+      padding: 10px;
+      background: #1a1a2e;
+      border-radius: 8px;
+      margin: 8px 0;
+      display: flex;
+      justify-content: space-between;
+    }
+    .player-host {
+      color: #f4d03f;
+      margin-right: 10px;
+    }
+    .input-code:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="game-container">
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
