@@ -34,4 +34,13 @@ export class Game {
     this.turnCounter++
   }
 
+  checkWinCondition(): 'win' | 'loss' | null {
+    const cards = (this.board as any).cards as any[]
+    const assassinRevealed = cards.some((c: any) => c['cardType'] === 'ASSASSIN' && c['revealed'])
+    if (assassinRevealed) return 'loss'
+    const allGreenRevealed = cards.filter((c: any) => c['cardType'] === 'GREEN').every((c: any) => c['revealed'])
+    if (allGreenRevealed) return 'win'
+    return null
+  }
+
 }

@@ -363,7 +363,17 @@ function renderBoard() {
       el.style.cssText = `padding:24px 12px;border-radius:10px;border:2px solid #4a4a6a;
         background:${card.revealed ? '#f4d03f' : '#16213e'};
         color:${card.revealed ? '#111' : '#fff'};font-weight:bold;cursor:pointer;min-height:100px;`;
-      el.addEventListener('click', () => { board.revealCard(card.cardId); renderBoard(); });
+      el.addEventListener('click', () => {
+        board.revealCard(card.cardId);
+        const result = currentGame!.checkWinCondition();
+        if (result === 'win') {
+          gameContainer.innerHTML = `<div style="text-align:center;padding:60px;color:#2ecc71;font-size:2rem;font-weight:bold;">You Win! All green cards revealed.</div>`;
+        } else if (result === 'loss') {
+          gameContainer.innerHTML = `<div style="text-align:center;padding:60px;color:#e74c3c;font-size:2rem;font-weight:bold;">Game Over! The assassin was revealed.</div>`;
+        } else {
+          renderBoard();
+        }
+      });
       boardGrid.appendChild(el);
     });
   }
