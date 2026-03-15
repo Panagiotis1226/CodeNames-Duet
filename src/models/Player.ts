@@ -3,6 +3,7 @@ export class Player {
   private playerName: string
   private isHost: boolean
   private connected: boolean
+  private currentClue: { word: string; number: number } | null = null
 
   constructor(playerId: string, playerName: string, isHost: boolean = false) {
     this.playerId = playerId
@@ -18,8 +19,13 @@ export class Player {
     console.log(`${this.playerName} joining room ${inviteCode}`)
   }
 
-  createClue(word: string, number: number) {
-    return { word, number }
+  createClue(word: string, number: number): { word: string; number: number } {
+    this.currentClue = { word, number }
+    return this.currentClue
+  }
+
+  getClue(): { word: string; number: number } | null {
+    return this.currentClue
   }
 
   guessCard(cardId: string): void {

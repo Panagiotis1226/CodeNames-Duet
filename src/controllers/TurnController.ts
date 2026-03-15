@@ -13,9 +13,21 @@ export class TurnController {
 
   startTurn(playerId: string): void {
     this.turn.initializeTurn()
-    this.turn.enableGuessingPhase()
     this.game.updateTurnCounter()
     console.log(`Turn started for player: ${playerId}`)
+  }
+
+  submitClue(word: string, number: number): void {
+    this.turn.setClue(word, number)
+    this.turn.enableGuessingPhase()
+  }
+
+  isGuessingEnabled(): boolean {
+    return this.turn.isGuessingEnabled()
+  }
+
+  getClue(): { word: string; number: number } {
+    return this.turn.getClue()
   }
 
 }

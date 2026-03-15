@@ -348,21 +348,51 @@ function handleStartMatch(firestorePlayers: any[], difficulty: string) {
 // ── Board render (from Jean) ──────────────────────────────────────────────────
 
 function renderBoard() {
-  if (!currentGame) return;
+  if (!currentGame || !currentTurnController) return;
   const board = (currentGame as any).board;
   const cards = (board as any).cards as any[];
+  const guessingEnabled = currentTurnController.isGuessingEnabled();
 
   if (gameContainer) {
-    gameContainer.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:20px;width:800px;box-sizing:border-box;" id="boardGrid"></div>
-    `;
-    const boardGrid = document.getElementById('boardGrid')!;
+    gameContainer.innerHTML = '';
+
+    if (!guessingEnabled) {
+      const clueForm = document.createElement('div');
+      clueForm.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px;`;
+      clueForm.innerHTML = `
+        <h3 style="color:#fff;margin:0;">Give a Clue</h3>
+        <div style="display:flex;gap:10px;">
+          <input id="clueWord" type="text" placeholder="Clue word" style="padding:10px;border-radius:8px;border:2px solid #4a4a6a;background:#16213e;color:#fff;font-size:1rem;" />
+          <input id="clueNumber" type="number" min="1" max="9" placeholder="Number" style="padding:10px;border-radius:8px;border:2px solid #4a4a6a;background:#16213e;color:#fff;font-size:1rem;width:80px;" />
+          <button id="submitClueBtn" style="padding:10px 20px;border-radius:8px;background:#4a4a6a;color:#fff;font-weight:bold;border:none;cursor:pointer;">Submit</button>
+        </div>
+      `;
+      gameContainer.appendChild(clueForm);
+
+      document.getElementById('submitClueBtn')!.addEventListener('click', () => {
+        const word = (document.getElementById('clueWord') as HTMLInputElement).value.trim();
+        const number = parseInt((document.getElementById('clueNumber') as HTMLInputElement).value);
+        if (!word || isNaN(number)) return;
+        currentTurnController!.submitClue(word, number);
+        renderBoard();
+      });
+    } else {
+      const clue = currentTurnController.getClue();
+      const clueDisplay = document.createElement('div');
+      clueDisplay.style.cssText = `text-align:center;padding:10px;color:#f4d03f;font-size:1.2rem;font-weight:bold;`;
+      clueDisplay.textContent = `Clue: "${clue.word}" — ${clue.number}`;
+      gameContainer.appendChild(clueDisplay);
+    }
+
+    const boardGrid = document.createElement('div');
+    boardGrid.style.cssText = `display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:20px;width:800px;box-sizing:border-box;`;
     cards.forEach((card: any) => {
       const el = document.createElement('button');
       el.textContent = card.word;
+      el.disabled = !guessingEnabled;
       el.style.cssText = `padding:24px 12px;border-radius:10px;border:2px solid #4a4a6a;
         background:${card.revealed ? '#f4d03f' : '#16213e'};
-        color:${card.revealed ? '#111' : '#fff'};font-weight:bold;cursor:pointer;min-height:100px;`;
+        color:${card.revealed ? '#111' : '#fff'};font-weight:bold;cursor:${guessingEnabled ? 'pointer' : 'not-allowed'};min-height:100px;opacity:${guessingEnabled ? '1' : '0.6'};`;
       el.addEventListener('click', () => {
         board.revealCard(card.cardId);
         const result = currentGame!.checkWinCondition();
@@ -376,6 +406,7 @@ function renderBoard() {
       });
       boardGrid.appendChild(el);
     });
+    gameContainer.appendChild(boardGrid);
   }
 }
 
