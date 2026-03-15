@@ -159,6 +159,11 @@ function listenToLobby(lobbyId: string) {
     const currentUser = auth.currentUser;
     if (!currentUser) return;
 
+    if (lobbyData.status === 'started') {
+      handleStartMatch(lobbyData.players || [], lobbyData.difficulty || 'normal');
+      return;
+    }
+
     const isHost = lobbyData.hostId === currentUser.uid;
     if (isHost) renderHostLobbyPage(lobbyData.code, lobbyData);
     else renderPlayerLobbyPage(lobbyData.code, lobbyData);
@@ -251,8 +256,10 @@ function renderHostLobbyPage(lobbyCode: string, lobbyData: any) {
     nameInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') saveName(); });
   }
 
-  document.getElementById('startGameBtn')?.addEventListener('click', () => {
-    if (players.length >= 2) handleStartMatch(players, lobbyData.difficulty || 'normal');
+  document.getElementById('startGameBtn')?.addEventListener('click', async () => {
+    if (players.length >= 2 && currentLobbyId) {
+      await updateDoc(doc(db, 'lobbies', currentLobbyId), { status: 'started' });
+    }
   });
 }
 
