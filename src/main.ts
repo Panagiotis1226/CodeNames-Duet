@@ -300,7 +300,6 @@ function renderPlayerLobbyPage(lobbyCode: string, lobbyData: any) {
         <span>${lobbyData.difficulty || 'normal'}</span>
       </div>
     </div>
-    <p style="color:#888;margin-top:20px;">Waiting for host to start the game...</p>
   `;
 
   const saveNameBtn = document.getElementById('saveNameBtn');
