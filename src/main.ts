@@ -18,6 +18,7 @@ let currentRoom: Room | null = null;
 let currentRoomController: RoomController | null = null;
 let currentGame: Game | null = null;
 let currentTurnController: TurnController | null = null;
+let currentPlayers: Player[] = [];
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -319,12 +320,12 @@ function renderPlayerLobbyPage(lobbyCode: string, lobbyData: any) {
 
 function handleStartMatch(firestorePlayers: any[], difficulty: string) {
   // Map Firestore player objects → Jean's Player class instances
-  const playerObjects = firestorePlayers.map(
+  currentPlayers = firestorePlayers.map(
     (p, i) => new Player(p.id, p.name, i === 0)
   );
 
   // Build Room + RoomController (Jean's OOP)
-  const [host] = playerObjects;
+  const [host] = currentPlayers;
   currentRoom = new Room('active', host);
   currentRoomController = new RoomController(currentRoom);
   currentRoomController.setDifficulty(difficulty);
@@ -333,7 +334,7 @@ function handleStartMatch(firestorePlayers: any[], difficulty: string) {
   currentRoomController.startMatch();
 
   // Build Game directly for local rendering
-  currentGame = new Game(playerObjects, difficulty);
+  currentGame = new Game(currentPlayers, difficulty);
   currentGame.initializeGameData();
   currentGame.startFirstRound();
 
@@ -373,7 +374,8 @@ function renderBoard() {
         const word = (document.getElementById('clueWord') as HTMLInputElement).value.trim();
         const number = parseInt((document.getElementById('clueNumber') as HTMLInputElement).value);
         if (!word || isNaN(number)) return;
-        currentTurnController!.submitClue(word, number);
+        const clue = currentPlayers[0].createClue(word, number);
+        currentTurnController!.submitClue(clue.word, clue.number);
         renderBoard();
       });
     } else {
