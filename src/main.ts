@@ -1,203 +1,375 @@
-import { Player } from "./models/Player"
-import { Room } from "./models/Room"
-import { LANService } from "./services/LANService"
-import { RoomController } from "./controllers/RoomController"
-import { Game } from "./models/Game"
-import { Turn } from "./models/Turn"
-import { TurnController } from "./controllers/TurnController"
+import { db, auth } from './firebase';
+import { collection, addDoc, doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { signInAnonymously } from 'firebase/auth';
 
-const app = document.getElementById("app") as HTMLDivElement
-const gameContainer = document.getElementById("game-container") as HTMLDivElement
+import { Player } from './models/Player';
+import { Room } from './models/Room';
+import { RoomController } from './controllers/RoomController';
+import { Game } from './models/Game';
+import { Turn } from './models/Turn';
+import { TurnController } from './controllers/TurnController';
 
-let currentRoom: Room | null = null
-let currentRoomController: RoomController | null = null
-let currentGame: Game | null = null
-let currentTurnController: TurnController | null = null
+const app = document.getElementById('app')!;
+const gameContainer = document.getElementById('game-container') as HTMLDivElement;
 
-function generateLobbyCode(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-  let code = ""
+let currentLobbyUnsubscribe: (() => void) | null = null;
+let currentLobbyId: string | null = null;
+let currentRoom: Room | null = null;
+let currentRoomController: RoomController | null = null;
+let currentGame: Game | null = null;
+let currentTurnController: TurnController | null = null;
 
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length))
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+async function initAuth() {
+  try {
+    if (auth.currentUser) return;
+    const result = await signInAnonymously(auth);
+    console.log('Anonymous auth:', result.user.uid);
+  } catch (error) {
+    console.error('Auth error:', error);
   }
-
-  return code
 }
 
-function renderHomePage(): void {
+// ── Lobby code generator ──────────────────────────────────────────────────────
+
+function generateLobbyCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+  return code;
+}
+
+// ── Home page ─────────────────────────────────────────────────────────────────
+
+function renderHomePage() {
   app.innerHTML = `
     <h1 class="home-title">CODENAMES</h1>
     <p class="home-subtitle">Duet Edition</p>
-
     <button id="createLobbyBtn" class="btn btn-primary">Create Lobby</button>
-
     <div class="join-section">
       <h3>Join Existing Lobby</h3>
       <input type="text" id="lobbyCodeInput" class="input-code" placeholder="ENTER CODE" maxlength="6">
       <button id="joinLobbyBtn" class="btn btn-secondary">Join Lobby</button>
     </div>
-  `
+  `;
+  if (gameContainer) gameContainer.innerHTML = '';
 
-  gameContainer.innerHTML = `<canvas id="gameCanvas" width="800" height="600"></canvas>`
-
-  const createLobbyBtn = document.getElementById("createLobbyBtn") as HTMLButtonElement
-  const joinLobbyBtn = document.getElementById("joinLobbyBtn") as HTMLButtonElement
-
-  createLobbyBtn.addEventListener("click", handleCreateLobby)
-  joinLobbyBtn.addEventListener("click", handleJoinLobby)
+  document.getElementById('createLobbyBtn')?.addEventListener('click', createLobby);
+  document.getElementById('joinLobbyBtn')?.addEventListener('click', () => {
+    const code = (document.getElementById('lobbyCodeInput') as HTMLInputElement).value.toUpperCase();
+    if (code.length === 6) joinLobby(code);
+    else alert('Please enter a valid 6-character lobby code');
+  });
 }
 
-function renderLobbyPage(lobbyCode: string): void {
+// ── Create lobby (from main — untouched) ─────────────────────────────────────
+
+async function createLobby() {
+  const lobbyCode = generateLobbyCode();
+  let user = auth.currentUser;
+  if (!user) { await initAuth(); user = auth.currentUser; }
+  if (!user) { alert('Authentication failed. Please refresh.'); renderHomePage(); return; }
+
+  try {
+    const docRef = await addDoc(collection(db, 'lobbies'), {
+      code: lobbyCode,
+      hostId: user.uid,
+      players: [{ id: user.uid, name: 'Player 1', isHost: true, role: null }],
+      status: 'waiting',
+      difficulty: 'normal',
+      createdAt: new Date()
+    });
+    currentLobbyId = docRef.id;
+    listenToLobby(docRef.id);
+  } catch (error) {
+    console.error('Error creating lobby:', error);
+    alert('Failed to create lobby. Please try again.');
+    renderHomePage();
+  }
+}
+
+// ── Join lobby (from main — untouched) ────────────────────────────────────────
+
+async function joinLobby(code: string) {
+  const joinBtn = document.getElementById('joinLobbyBtn') as HTMLButtonElement;
+  if (joinBtn) { joinBtn.textContent = 'Joining...'; joinBtn.disabled = true; }
+
+  let user = auth.currentUser;
+  if (!user) {
+    await initAuth();
+    user = auth.currentUser;
+    if (!user) {
+      alert('Authentication failed. Please try again.');
+      if (joinBtn) { joinBtn.textContent = 'Join Lobby'; joinBtn.disabled = false; }
+      return;
+    }
+  }
+
+  try {
+    const { getDocs, query, where } = await import('firebase/firestore');
+    const q = query(collection(db, 'lobbies'), where('code', '==', code));
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      alert('Lobby not found. Please check the code and try again.');
+      if (joinBtn) { joinBtn.textContent = 'Join Lobby'; joinBtn.disabled = false; }
+      return;
+    }
+
+    const lobbyDoc = snapshot.docs[0];
+    const lobbyData = lobbyDoc.data();
+
+    if (lobbyData.players && lobbyData.players.length >= 2) {
+      alert('This lobby is full.');
+      if (joinBtn) { joinBtn.textContent = 'Join Lobby'; joinBtn.disabled = false; }
+      return;
+    }
+
+    const alreadyInLobby = lobbyData.players?.some((p: { id: string }) => p.id === user!.uid);
+    if (alreadyInLobby) {
+      currentLobbyId = lobbyDoc.id;
+      listenToLobby(lobbyDoc.id);
+      return;
+    }
+
+    const newPlayer = { id: user.uid, name: `Player ${lobbyData.players?.length + 1 || 2}`, isHost: false, role: null };
+    await updateDoc(doc(db, 'lobbies', lobbyDoc.id), {
+      players: [...(lobbyData.players || []), newPlayer]
+    });
+
+    currentLobbyId = lobbyDoc.id;
+    listenToLobby(lobbyDoc.id);
+  } catch (error) {
+    console.error('Error joining lobby:', error);
+    alert('Failed to join lobby. Please try again.');
+    if (joinBtn) { joinBtn.textContent = 'Join Lobby'; joinBtn.disabled = false; }
+  }
+}
+
+// ── Firestore listener (from main — untouched) ────────────────────────────────
+
+function listenToLobby(lobbyId: string) {
+  if (currentLobbyUnsubscribe) currentLobbyUnsubscribe();
+
+  currentLobbyUnsubscribe = onSnapshot(doc(db, 'lobbies', lobbyId), (snapshot) => {
+    if (!snapshot.exists()) { alert('Lobby was closed.'); renderHomePage(); return; }
+    const lobbyData = snapshot.data();
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+
+    const isHost = lobbyData.hostId === currentUser.uid;
+    if (isHost) renderHostLobbyPage(lobbyData.code, lobbyData);
+    else renderPlayerLobbyPage(lobbyData.code, lobbyData);
+  });
+}
+
+// ── Host lobby page (from main — untouched, + difficulty wired) ───────────────
+
+function renderHostLobbyPage(lobbyCode: string, lobbyData: any) {
+  const players = lobbyData.players || [];
+  const currentUser = auth.currentUser;
+
+  const playersHtml = players.map((p: { id: string; name: string; isHost: boolean }) => {
+    const isCurrentUser = p.id === currentUser?.uid;
+    const nameEditHtml = isCurrentUser
+      ? `<input type="text" class="name-edit-input" id="nameInput" value="${p.name}" maxlength="15">
+         <button class="edit-name-btn" id="saveNameBtn">Save</button>`
+      : `<span>${p.name}</span>`;
+    return `
+      <div class="player-item" data-player-id="${p.id}">
+        ${nameEditHtml}
+        ${isCurrentUser ? '(You)' : ''}
+        ${p.isHost ? '<span class="player-host">Host</span>' : ''}
+      </div>`;
+  }).join('');
+
+  const waitingSlot = players.length < 2
+    ? '<div class="player-item" style="opacity:0.5;"><span>Waiting for player...</span></div>' : '';
+
   app.innerHTML = `
     <h1 class="home-title">LOBBY</h1>
-    <p class="home-subtitle">Lobby Created Successfully</p>
+    <p class="home-subtitle">Share this code with your partner</p>
+    <div class="lobby-code-container">
+      <div class="lobby-code-display" id="lobbyCode">${lobbyCode}</div>
+      <button id="copyBtn" class="copy-btn">Copy</button>
+    </div>
+    <div class="players-section">
+      <h3>Players</h3>
+      <div id="playersList">${playersHtml}${waitingSlot}</div>
+    </div>
+    <div class="settings-section">
+      <h3>Game Settings</h3>
+      <div class="setting-row">
+        <span class="setting-label">Difficulty (Board Size)</span>
+        <select id="difficultySelect">
+          <option value="easy" ${lobbyData.difficulty === 'easy' ? 'selected' : ''}>Easy</option>
+          <option value="normal" ${lobbyData.difficulty === 'normal' || !lobbyData.difficulty ? 'selected' : ''}>Normal</option>
+          <option value="hard" ${lobbyData.difficulty === 'hard' ? 'selected' : ''}>Hard</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Timer</span>
+        <span class="setting-placeholder">[Placeholder]</span>
+      </div>
+    </div>
+    <button id="startGameBtn" class="btn btn-primary" ${players.length < 2 ? 'disabled' : ''}>
+      ${players.length < 2 ? 'Waiting for Player...' : 'Start Game'}
+    </button>
+  `;
 
+  document.getElementById('copyBtn')?.addEventListener('click', () => {
+    navigator.clipboard.writeText(lobbyCode).then(() => {
+      const btn = document.getElementById('copyBtn');
+      if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 2000); }
+    });
+  });
+
+  // Difficulty — persisted to Firestore so both players see it
+  document.getElementById('difficultySelect')?.addEventListener('change', async (e) => {
+    const val = (e.target as HTMLSelectElement).value;
+    if (currentLobbyId) await updateDoc(doc(db, 'lobbies', currentLobbyId), { difficulty: val });
+  });
+
+  const saveNameBtn = document.getElementById('saveNameBtn');
+  const nameInput = document.getElementById('nameInput') as HTMLInputElement;
+  if (saveNameBtn && nameInput && currentLobbyId) {
+    const saveName = async () => {
+      const newName = nameInput.value.trim();
+      if (newName && newName.length <= 15 && currentLobbyId) {
+        const lobbyRef = doc(db, 'lobbies', currentLobbyId);
+        const snap = await getDoc(lobbyRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          const updated = data.players.map((p: any) => p.id === currentUser?.uid ? { ...p, name: newName } : p);
+          await updateDoc(lobbyRef, { players: updated });
+        }
+      }
+    };
+    saveNameBtn.addEventListener('click', saveName);
+    nameInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') saveName(); });
+  }
+
+  document.getElementById('startGameBtn')?.addEventListener('click', () => {
+    if (players.length >= 2) handleStartMatch(players, lobbyData.difficulty || 'normal');
+  });
+}
+
+// ── Player lobby page (from main — untouched) ─────────────────────────────────
+
+function renderPlayerLobbyPage(lobbyCode: string, lobbyData: any) {
+  const players = lobbyData.players || [];
+  const currentUser = auth.currentUser;
+
+  const playersHtml = players.map((p: { id: string; name: string; isHost: boolean }) => {
+    const isCurrentUser = p.id === currentUser?.uid;
+    const nameEditHtml = isCurrentUser
+      ? `<input type="text" class="name-edit-input" id="nameInput" value="${p.name}" maxlength="15">
+         <button class="edit-name-btn" id="saveNameBtn">Save</button>`
+      : `<span>${p.name}</span>`;
+    return `
+      <div class="player-item" data-player-id="${p.id}">
+        ${nameEditHtml}
+        ${isCurrentUser ? '(You)' : ''}
+        ${p.isHost ? '<span class="player-host">Host</span>' : ''}
+      </div>`;
+  }).join('');
+
+  app.innerHTML = `
+    <h1 class="home-title">LOBBY</h1>
+    <p class="home-subtitle">Joined Lobby</p>
     <div class="lobby-code-container">
       <div class="lobby-code-display">${lobbyCode}</div>
     </div>
-
     <div class="players-section">
       <h3>Players</h3>
-      <div class="player-item">
-        <span>Player 1 (Host)</span>
-      </div>
-      <div class="player-item">
-        <span>Player 2</span>
-      </div>
+      <div id="playersList">${playersHtml}</div>
     </div>
-
     <div class="settings-section">
       <h3>Game Settings</h3>
       <div class="setting-row">
         <span class="setting-label">Difficulty</span>
-        <select id="difficultySelect">
-          <option value="easy">Easy</option>
-          <option value="normal" selected>Normal</option>
-          <option value="hard">Hard</option>
-        </select>
+        <span>${lobbyData.difficulty || 'normal'}</span>
       </div>
     </div>
+    <p style="color:#888;margin-top:20px;">Waiting for host to start the game...</p>
+  `;
 
-    <button id="startGameBtn" class="btn btn-primary">Start Match</button>
-    <button id="backBtn" class="btn btn-secondary">Back</button>
-  `
-
-  const startGameBtn = document.getElementById("startGameBtn") as HTMLButtonElement
-  const backBtn = document.getElementById("backBtn") as HTMLButtonElement
-  const difficultySelect = document.getElementById("difficultySelect") as HTMLSelectElement
-
-  difficultySelect.addEventListener("change", () => {
-    if (currentRoomController !== null) {
-      currentRoomController.setDifficulty(difficultySelect.value)
-    }
-  })
-
-  startGameBtn.addEventListener("click", handleStartMatch)
-  backBtn.addEventListener("click", renderHomePage)
-}
-
-function handleCreateLobby(): void {
-  const hostPlayer = new Player("1", "Player 1", true)
-  const lobbyCode = generateLobbyCode()
-
-  currentRoom = new Room(lobbyCode, hostPlayer)
-  const lanService = new LANService()
-  currentRoomController = new RoomController(currentRoom, lanService)
-
-  currentRoomController.createRoom(hostPlayer)
-  currentRoomController.setDifficulty("normal")
-
-  renderLobbyPage(lobbyCode)
-}
-
-function handleJoinLobby(): void {
-  const lobbyCodeInput = document.getElementById("lobbyCodeInput") as HTMLInputElement
-  const code = lobbyCodeInput.value.trim().toUpperCase()
-
-  if (code.length !== 6) {
-    alert("Please enter a valid 6-character lobby code.")
-    return
+  const saveNameBtn = document.getElementById('saveNameBtn');
+  const nameInput = document.getElementById('nameInput') as HTMLInputElement;
+  if (saveNameBtn && nameInput && currentLobbyId) {
+    const saveName = async () => {
+      const newName = nameInput.value.trim();
+      if (newName && newName.length <= 15 && currentLobbyId) {
+        const lobbyRef = doc(db, 'lobbies', currentLobbyId);
+        const snap = await getDoc(lobbyRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          const updated = data.players.map((p: any) => p.id === currentUser?.uid ? { ...p, name: newName } : p);
+          await updateDoc(lobbyRef, { players: updated });
+        }
+      }
+    };
+    saveNameBtn.addEventListener('click', saveName);
+    nameInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') saveName(); });
   }
-
-  const hostPlayer = new Player("1", "Player 1", true)
-  const guestPlayer = new Player("2", "Player 2", false)
-
-  currentRoom = new Room(code, hostPlayer)
-  const lanService = new LANService()
-  currentRoomController = new RoomController(currentRoom, lanService)
-
-  currentRoomController.createRoom(hostPlayer)
-  currentRoomController.joinRoom(guestPlayer, code)
-
-  renderLobbyPage(code)
 }
 
-function handleStartMatch(): void {
-  if (currentRoomController === null) {
-    alert("No room available.")
-    return
+// ── Start match — Jean's OOP wired in here ────────────────────────────────────
+
+function handleStartMatch(firestorePlayers: any[], difficulty: string) {
+  // Map Firestore player objects → Jean's Player class instances
+  const playerObjects = firestorePlayers.map(
+    (p, i) => new Player(p.id, p.name, i === 0)
+  );
+
+  // Build Room + RoomController (Jean's OOP)
+  const [host] = playerObjects;
+  currentRoom = new Room('active', host);
+  currentRoomController = new RoomController(currentRoom);
+  currentRoomController.setDifficulty(difficulty);
+
+  // startMatch() calls room.createGame() internally
+  currentRoomController.startMatch();
+
+  // Build Game directly for local rendering
+  currentGame = new Game(playerObjects, difficulty);
+  currentGame.initializeGameData();
+  currentGame.startFirstRound();
+
+  // Start first turn with host as active player
+  const turn = new Turn(host.getId());
+  currentTurnController = new TurnController(turn, currentGame);
+  currentTurnController.startTurn(host.getId());
+
+  renderBoard();
+}
+
+// ── Board render (from Jean) ──────────────────────────────────────────────────
+
+function renderBoard() {
+  if (!currentGame) return;
+  const board = (currentGame as any).board;
+  const cards = (board as any).cards as any[];
+
+  if (gameContainer) {
+    gameContainer.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:20px;width:800px;box-sizing:border-box;" id="boardGrid"></div>
+    `;
+    const boardGrid = document.getElementById('boardGrid')!;
+    cards.forEach((card: any) => {
+      const el = document.createElement('button');
+      el.textContent = card.word;
+      el.style.cssText = `padding:24px 12px;border-radius:10px;border:2px solid #4a4a6a;
+        background:${card.revealed ? '#f4d03f' : '#16213e'};
+        color:${card.revealed ? '#111' : '#fff'};font-weight:bold;cursor:pointer;min-height:100px;`;
+      el.addEventListener('click', () => { board.revealCard(card.cardId); renderBoard(); });
+      boardGrid.appendChild(el);
+    });
   }
-
-  currentRoomController.startMatch()
-
-  const hostPlayer = new Player("1", "Player 1", true)
-  const guestPlayer = new Player("2", "Player 2", false)
-
-  currentGame = new Game([hostPlayer, guestPlayer], "normal")
-  currentGame.initializeGameData()
-  currentGame.startFirstRound()
-
-  const turn = new Turn("1")
-  currentTurnController = new TurnController(turn, currentGame)
-  currentTurnController.startTurn("1")
-
-  renderBoard()
 }
 
-function renderBoard(): void {
-  if (currentGame === null) {
-    return
-  }
+// ── Init ──────────────────────────────────────────────────────────────────────
 
-  const board = (currentGame as any).board
-  const cards = (board as any).cards as any[]
-
-  gameContainer.innerHTML = `
-    <div style="
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-      padding: 20px;
-      width: 800px;
-      min-height: 600px;
-      box-sizing: border-box;
-      align-content: start;
-    " id="boardGrid"></div>
-  `
-
-  const boardGrid = document.getElementById("boardGrid") as HTMLDivElement
-
-  cards.forEach((card: any) => {
-    const cardElement = document.createElement("button")
-
-    cardElement.textContent = card.word
-    cardElement.style.padding = "24px 12px"
-    cardElement.style.borderRadius = "10px"
-    cardElement.style.border = "2px solid #4a4a6a"
-    cardElement.style.background = card.revealed ? "#f4d03f" : "#16213e"
-    cardElement.style.color = card.revealed ? "#111" : "#fff"
-    cardElement.style.fontWeight = "bold"
-    cardElement.style.cursor = "pointer"
-    cardElement.style.minHeight = "100px"
-
-    cardElement.addEventListener("click", () => {
-      board.revealCard(card.cardId)
-      renderBoard()
-    })
-
-    boardGrid.appendChild(cardElement)
-  })
-}
-
-renderHomePage()
+function init() { initAuth(); renderHomePage(); }
+init();

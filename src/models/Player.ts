@@ -1,5 +1,4 @@
 export class Player {
-
   private playerId: string
   private playerName: string
   private isHost: boolean
@@ -12,6 +11,9 @@ export class Player {
     this.connected = true
   }
 
+  getId(): string { return this.playerId }
+  getName(): string { return this.playerName }
+
   joinRoom(inviteCode: string): void {
     console.log(`${this.playerName} joining room ${inviteCode}`)
   }
@@ -23,5 +25,4 @@ export class Player {
   guessCard(cardId: string): void {
     console.log(`${this.playerName} guessed card ${cardId}`)
   }
-
 }
