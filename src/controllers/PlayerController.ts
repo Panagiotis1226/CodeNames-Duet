@@ -15,6 +15,7 @@ export class PlayerController {
     const card = this.board.getCard(cardId)
     if (!card) return 'continue'
     card.reveal()
+    if (card.getCardType() === 'GREEN') card.markAsIdentified()
     return this.game.evaluateGuess(card)
   }
 

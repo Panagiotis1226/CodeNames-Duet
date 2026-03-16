@@ -9,6 +9,7 @@ import { Game } from './models/Game';
 import { Turn } from './models/Turn';
 import { TurnController } from './controllers/TurnController';
 import { PlayerController } from './controllers/PlayerController';
+import { Card } from './models/Card';
 
 const app = document.getElementById('app')!;
 const gameContainer = document.getElementById('game-container') as HTMLDivElement;
@@ -361,7 +362,7 @@ function handleStartMatch(firestorePlayers: any[], difficulty: string) {
 function renderBoard() {
   if (!currentGame || !currentTurnController) return;
   const board = (currentGame as any).board;
-  const cards = (board as any).cards as any[];
+  const cards = (board as any).cards as Card[];
   const guessingEnabled = currentTurnController.isGuessingEnabled();
 
   if (gameContainer) {
@@ -398,15 +399,15 @@ function renderBoard() {
 
     const boardGrid = document.createElement('div');
     boardGrid.style.cssText = `display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:20px;width:800px;box-sizing:border-box;`;
-    cards.forEach((card: any) => {
+    cards.forEach((card: Card) => {
       const el = document.createElement('button');
-      el.textContent = card.word;
+      el.textContent = card.getWord();
       el.disabled = !guessingEnabled;
       el.style.cssText = `padding:24px 12px;border-radius:10px;border:2px solid #4a4a6a;
-        background:${card.revealed ? '#f4d03f' : '#16213e'};
-        color:${card.revealed ? '#111' : '#fff'};font-weight:bold;cursor:${guessingEnabled ? 'pointer' : 'not-allowed'};min-height:100px;opacity:${guessingEnabled ? '1' : '0.6'};`;
+        background:${card.isRevealed() ? '#f4d03f' : '#16213e'};
+        color:${card.isRevealed() ? '#111' : '#fff'};font-weight:bold;cursor:${guessingEnabled ? 'pointer' : 'not-allowed'};min-height:100px;opacity:${guessingEnabled ? '1' : '0.6'};`;
       el.addEventListener('click', () => {
-        const result = currentPlayerController!.makeGuess(card.cardId);
+        const result = currentPlayerController!.makeGuess(card.getId());
         if (result === 'win') {
           currentGame!.setStatus('Won');
           currentGame!.endMatch();

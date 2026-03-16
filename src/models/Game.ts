@@ -38,10 +38,10 @@ export class Game {
   }
 
   checkWinCondition(): 'win' | 'loss' | null {
-    const cards = (this.board as any).cards as any[]
-    const assassinRevealed = cards.some((c: any) => c['cardType'] === 'ASSASSIN' && c['revealed'])
+    const cards = (this.board as any).cards as Card[]
+    const assassinRevealed = cards.some(c => c.getCardType() === 'ASSASSIN' && c.isRevealed())
     if (assassinRevealed) return 'loss'
-    const allGreenRevealed = cards.filter((c: any) => c['cardType'] === 'GREEN').every((c: any) => c['revealed'])
+    const allGreenRevealed = cards.filter(c => c.getCardType() === 'GREEN').every(c => c.isRevealed())
     if (allGreenRevealed) return 'win'
     return null
   }
