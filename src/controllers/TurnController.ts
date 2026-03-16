@@ -30,4 +30,14 @@ export class TurnController {
     return this.turn.getClue()
   }
 
+  endTurn(): void {
+    this.turn.endTurn()
+  }
+
+  switchTurn(nextPlayerId: string): void {
+    this.turn.initializeTurn()
+    this.game.updateTurnCounter()
+    console.log(`Turn switched to player: ${nextPlayerId}`)
+  }
+
 }

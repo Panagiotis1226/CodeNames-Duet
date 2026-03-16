@@ -22,6 +22,7 @@ let currentGame: Game | null = null;
 let currentTurnController: TurnController | null = null;
 let currentPlayers: Player[] = [];
 let currentPlayerController: PlayerController | null = null;
+let currentPlayerIndex: number = 0;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -372,44 +373,69 @@ function renderBoard() {
   if (gameContainer) {
     gameContainer.innerHTML = '';
 
+    const activePlayer = currentPlayers[currentPlayerIndex];
+    const isMyTurn = activePlayer?.getId() === auth.currentUser?.uid;
+
+    const turnBanner = document.createElement('div');
+    turnBanner.style.cssText = `text-align:center;padding:10px;color:#fff;font-size:1.1rem;font-weight:bold;background:${isMyTurn ? '#27ae60' : '#4a4a6a'};border-radius:8px;margin:10px 20px;`;
+    turnBanner.textContent = `${activePlayer?.getId() ?? 'Unknown'}'s Turn${isMyTurn ? ' (You)' : ''}`;
+    gameContainer.appendChild(turnBanner);
+
     if (!guessingEnabled) {
       const clueForm = document.createElement('div');
       clueForm.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px;`;
       clueForm.innerHTML = `
         <h3 style="color:#fff;margin:0;">Give a Clue</h3>
         <div style="display:flex;gap:10px;">
-          <input id="clueWord" type="text" placeholder="Clue word" style="padding:10px;border-radius:8px;border:2px solid #4a4a6a;background:#16213e;color:#fff;font-size:1rem;" />
-          <input id="clueNumber" type="number" min="1" max="9" placeholder="Number" style="padding:10px;border-radius:8px;border:2px solid #4a4a6a;background:#16213e;color:#fff;font-size:1rem;width:80px;" />
-          <button id="submitClueBtn" style="padding:10px 20px;border-radius:8px;background:#4a4a6a;color:#fff;font-weight:bold;border:none;cursor:pointer;">Submit</button>
+          <input id="clueWord" type="text" placeholder="Clue word" ${!isMyTurn ? 'disabled' : ''} style="padding:10px;border-radius:8px;border:2px solid #4a4a6a;background:#16213e;color:#fff;font-size:1rem;" />
+          <input id="clueNumber" type="number" min="1" max="9" placeholder="Number" ${!isMyTurn ? 'disabled' : ''} style="padding:10px;border-radius:8px;border:2px solid #4a4a6a;background:#16213e;color:#fff;font-size:1rem;width:80px;" />
+          <button id="submitClueBtn" ${!isMyTurn ? 'disabled' : ''} style="padding:10px 20px;border-radius:8px;background:#4a4a6a;color:#fff;font-weight:bold;border:none;cursor:${isMyTurn ? 'pointer' : 'not-allowed'};">Submit</button>
         </div>
       `;
       gameContainer.appendChild(clueForm);
 
-      document.getElementById('submitClueBtn')!.addEventListener('click', () => {
-        const word = (document.getElementById('clueWord') as HTMLInputElement).value.trim();
-        const number = parseInt((document.getElementById('clueNumber') as HTMLInputElement).value);
-        if (!word || isNaN(number)) return;
-        const clue = currentPlayers[0].createClue(word, number);
-        currentTurnController!.submitClue(clue.word, clue.number);
-        renderBoard();
-      });
+      if (isMyTurn) {
+        document.getElementById('submitClueBtn')!.addEventListener('click', () => {
+          const word = (document.getElementById('clueWord') as HTMLInputElement).value.trim();
+          const number = parseInt((document.getElementById('clueNumber') as HTMLInputElement).value);
+          if (!word || isNaN(number)) return;
+          const clue = currentPlayers[0].createClue(word, number);
+          currentTurnController!.submitClue(clue.word, clue.number);
+          renderBoard();
+        });
+      }
     } else {
       const clue = currentTurnController.getClue();
       const clueDisplay = document.createElement('div');
       clueDisplay.style.cssText = `text-align:center;padding:10px;color:#f4d03f;font-size:1.2rem;font-weight:bold;`;
       clueDisplay.textContent = `Clue: "${clue.word}" — ${clue.number}`;
       gameContainer.appendChild(clueDisplay);
+
+      if (isMyTurn) {
+        const endTurnBtn = document.createElement('button');
+        endTurnBtn.textContent = 'End Turn';
+        endTurnBtn.style.cssText = `display:block;margin:0 auto;padding:10px 24px;border-radius:8px;background:#e74c3c;color:#fff;font-weight:bold;border:none;cursor:pointer;`;
+        endTurnBtn.addEventListener('click', () => {
+          currentTurnController!.endTurn();
+          currentPlayerIndex = currentPlayerIndex === 0 ? 1 : 0;
+          const nextPlayer = currentPlayers[currentPlayerIndex];
+          currentTurnController!.switchTurn(nextPlayer.getId());
+          renderBoard();
+        });
+        gameContainer.appendChild(endTurnBtn);
+      }
     }
 
     const boardGrid = document.createElement('div');
     boardGrid.style.cssText = `display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:20px;width:800px;box-sizing:border-box;`;
+    const canGuess = guessingEnabled && isMyTurn;
     cards.forEach((card: Card) => {
       const el = document.createElement('button');
       el.textContent = card.getWord();
-      el.disabled = !guessingEnabled;
+      el.disabled = !canGuess;
       el.style.cssText = `padding:24px 12px;border-radius:10px;border:2px solid #4a4a6a;
         background:${card.isRevealed() ? '#f4d03f' : '#16213e'};
-        color:${card.isRevealed() ? '#111' : '#fff'};font-weight:bold;cursor:${guessingEnabled ? 'pointer' : 'not-allowed'};min-height:100px;opacity:${guessingEnabled ? '1' : '0.6'};`;
+        color:${card.isRevealed() ? '#111' : '#fff'};font-weight:bold;cursor:${canGuess ? 'pointer' : 'not-allowed'};min-height:100px;opacity:${canGuess ? '1' : '0.6'};`;
       el.addEventListener('click', () => {
         const result = currentPlayerController!.makeGuess(card.getId());
         if (result === 'win') {
