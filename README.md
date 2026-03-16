@@ -1,72 +1,71 @@
 # Codenames Duet
 
-A web-based implementation of the Codenames Duet board game using TypeScript and Firebase.
+A web-based two-player implementation of the Codenames Duet board game built with TypeScript and Firebase.
 
 ## Tech Stack
 
 - **Frontend**: TypeScript, HTML5, CSS3
 - **Build Tool**: Vite
-- **Backend**: Firebase (Firestore, Authentication)
-- **Authentication**: Firebase Anonymous Auth
-
-## Features Implemented
-
-### 1. Homepage
-- Game title and subtitle display
-- **Create Lobby** button - generates a new game lobby
-- **Join Lobby** section with:
-  - 6-character invite code input
-  - Join button
-
-### 2. Lobby Creation
-- Generates unique 6-character lobby codes
-- Shows lobby page immediately (no loading delays)
-- Displays invite code with **Copy to Clipboard** button
-- Real-time player list updates using Firestore `onSnapshot`
-- Player name editing (click Save or press Enter)
-- Default names: "Player 1" (Host), "Player 2" (Joiner)
-
-### 3. Joining Lobbies
-- Enter 6-character invite code
-- Validates lobby exists
-- Checks if lobby is full (max 2 players)
-- Prevents duplicate joins
-- Adds player to lobby in real-time
-
-### 4. Lobby Features
-- **Host View**:
-  - Shows invite code with copy button
-  - Player list with host badge
-  - Name editing for own player
-  - Placeholder game settings (Difficulty, Timer)
-  - Start Game button (disabled until 2 players)
-  
-- **Player View**:
-  - Shows joined lobby code
-  - Player list with host badge
-  - Name editing for own player
-  - Placeholder game settings
-  - "Waiting for host to start" message
-
-### 5. Real-time Updates
-- Firestore `onSnapshot` listeners for live lobby updates
-- Both players see each other immediately
-- Name changes sync in real-time
-- Player join/leave updates instantly
+- **Backend**: Firebase (Firestore, Anonymous Authentication)
 
 ## Project Structure
 
 ```
-├── index.html          # Main HTML with CSS styles
+├── index.html                  # Main HTML and CSS styles
 ├── src/
-│   ├── main.ts        # Main application logic
-│   └── firebase.ts    # Firebase configuration (ignored in git)
-├── package.json       # Dependencies
-├── tsconfig.json      # TypeScript config
-└── .gitignore         # Git ignore rules
+│   ├── main.ts                 # Application entry point — auth, lobby UI, game rendering, Firestore sync
+│   ├── firebase.ts             # Firebase configuration (not committed to git)
+│   ├── models/
+│   │   ├── Game.ts             # Central game state — board, players, turn counter, status, timer, key map
+│   │   ├── Board.ts            # Card generation, grid sizing, board reconstruction from Firestore
+│   │   ├── Card.ts             # Single card — word, type (GREEN/NEUTRAL/ASSASSIN), revealed state
+│   │   ├── CardType.ts         # Enum defining the three card types
+│   │   ├── Player.ts           # Player identity, name, host flag, clue storage
+│   │   ├── Room.ts             # Lobby state — players, host, difficulty, match-started flag
+│   │   ├── Turn.ts             # Turn state — active player, clue, guessing phase flag
+│   │   ├── Timer.ts            # Timer metadata model — countdown driven externally via setInterval
+│   │   └── KeyMap.ts           # O(1) card-id → card-type lookup map built at game init
+│   └── controllers/
+│       ├── RoomController.ts   # Room lifecycle — create, join, set difficulty, start match
+│       ├── TurnController.ts   # Turn lifecycle — start, submit clue, enable guessing, end, switch
+│       └── PlayerController.ts # Guess action — reveal card, mark as identified, evaluate win/loss
+├── package.json
+└── tsconfig.json
 ```
 
-## Setup Instructions
+## Features
+
+### Lobby System
+- Landing page with **Create Lobby** and **Join Lobby** options
+- 6-character alphanumeric lobby codes shared between players
+- Real-time lobby updates via Firestore `onSnapshot` — both players see name changes and join events instantly
+- Host can edit difficulty and timer settings; guest sees them live (read-only)
+- Each player can edit their own display name (up to 15 characters)
+- Start Game button enabled only when both players are present
+
+### Game Board
+- Three difficulty levels:
+  - **Easy** — 3×3 grid, 9 cards (3 green, 1 assassin)
+  - **Normal** — 5×5 grid, 25 cards (9 green, 3 assassin)
+  - **Hard** — 5×5 grid, 25 cards (11 green, 3 assassin)
+- Host generates the board and writes it to Firestore; guest reconstructs it deterministically — no RNG divergence between clients
+
+### Turn Structure
+- Players alternate turns: the active player submits a clue (word + number), the other player guesses
+- Clue submission is written to Firestore and triggers the guessing phase on both clients
+- Guessing phase can be ended manually or automatically when the turn timer expires
+- Turn state (active player, clue, guessing phase) is fully synchronised via Firestore
+
+### Win / Loss Conditions
+- **Win** — all GREEN cards revealed
+- **Loss** — any ASSASSIN card revealed
+
+### Timer
+- Optional per-turn countdown: Off, 30s, 60s, 90s, 2 min, 3 min
+- Set by the host in the lobby; applies to the guessing phase of each turn
+- Only the active guesser drives the countdown to avoid duplicate Firestore writes
+
+## Setup
 
 ### 1. Install Dependencies
 ```bash
@@ -75,11 +74,10 @@ npm install
 
 ### 2. Firebase Configuration
 1. Go to [Firebase Console](https://console.firebase.google.com)
-2. Create a new project
-3. Register a web app
-4. Enable **Authentication** → **Anonymous** sign-in
-5. Enable **Firestore Database** (start in test mode)
-6. Copy Firebase config to `src/firebase.ts`
+2. Create a project and register a web app
+3. Enable **Authentication → Anonymous** sign-in
+4. Enable **Firestore Database** (test mode is fine for development)
+5. Copy your Firebase config into `src/firebase.ts`
 
 ### 3. Run Development Server
 ```bash
@@ -91,36 +89,21 @@ npm run dev
 npm run build
 ```
 
-## Testing Multiplayer
-
-Since Firebase Auth persists across browser tabs, test with:
-- **Option 1**: Host in regular window, Joiner in Incognito/Private window
-- **Option 2**: Use different browsers (Chrome + Firefox)
-- **Option 3**: Different devices on same network
-
 ## Available Scripts
 
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run preview` - Preview production build
+- `npm run dev` — start development server
+- `npm run build` — type-check and build for production
+- `npm run preview` — preview production build locally
 
-## Game Settings (Placeholders)
+## Testing Multiplayer Locally
 
-- **Difficulty (Board Size)**: Not yet implemented
-- **Timer**: Not yet implemented
-- **Start Game**: Not yet implemented
+Firebase Anonymous Auth persists per browser session, so use one of:
+- Host in a normal window, guest in an Incognito / Private window
+- Two different browsers (e.g. Chrome + Firefox)
+- Two different devices on the same network
 
 ## Security Notes
 
-- Firestore rules currently allow all reads/writes (test mode)
-- Firebase config should NOT be committed to git (in `.gitignore`)
-- Anonymous auth is used for simple player identification
-
-## Future Features
-
-- Actual game board with word grid
-- Spymaster vs Operative roles
-- Clue giving and guessing mechanics
-- Timer implementation
-- Win/loss conditions
-- Difficulty settings (board sizes)
+- Firebase config is excluded from git via `.gitignore`
+- Anonymous auth is used — no account required
+- Firestore rules are currently open (test mode); restrict them before any public deployment
