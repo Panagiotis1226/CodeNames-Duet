@@ -8,12 +8,16 @@ export class Timer {
     this._running = false
   }
 
+  setDuration(seconds: number): void {
+    this.duration = seconds
+  }
+
   start(): void {
     this._running = true
   }
 
   stop(): void {
-    this.running = false
+    this._running = false
   }
 
   reset(): void {
@@ -22,6 +26,10 @@ export class Timer {
 
   getDuration(): number {
     return this.duration
+  }
+
+  isRunning(): boolean {
+    return this._running
   }
 
 }

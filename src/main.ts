@@ -24,6 +24,9 @@ let currentPlayers: Player[] = [];
 let currentPlayerController: PlayerController | null = null;
 let currentPlayerIndex: number = 0;
 let gameInitialized: boolean = false;
+let currentTimerDuration: number = 0;
+let activeTimerInterval: ReturnType<typeof setInterval> | null = null;
+let timerSecondsLeft: number = 0;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -194,10 +197,16 @@ function syncGameState(lobbyData: any) {
   }
 
   if (lobbyData.guessingEnabled && lobbyData.clue) {
-    if (!currentTurnController.isGuessingEnabled()) {
+    const wasGuessing = currentTurnController.isGuessingEnabled();
+    if (!wasGuessing) {
       currentTurnController.submitClue(lobbyData.clue.word, lobbyData.clue.number);
+      const activePlayer = currentPlayers[currentPlayerIndex];
+      if (activePlayer?.getId() === auth.currentUser?.uid) {
+        startGuessTimer(autoEndTurn);
+      }
     }
   } else if (!lobbyData.guessingEnabled && currentTurnController.isGuessingEnabled()) {
+    stopGuessTimer();
     currentTurnController.endTurn();
     currentTurnController.switchTurn(currentPlayers[currentPlayerIndex].getId());
   }
@@ -252,8 +261,15 @@ function renderHostLobbyPage(lobbyCode: string, lobbyData: any) {
         </select>
       </div>
       <div class="setting-row">
-        <span class="setting-label">Timer</span>
-        <span class="setting-placeholder">[Placeholder]</span>
+        <span class="setting-label">Timer (per turn)</span>
+        <select id="timerSelect">
+          <option value="0" ${!lobbyData.timerDuration ? 'selected' : ''}>Off</option>
+          <option value="30" ${lobbyData.timerDuration === 30 ? 'selected' : ''}>30s</option>
+          <option value="60" ${lobbyData.timerDuration === 60 ? 'selected' : ''}>60s</option>
+          <option value="90" ${lobbyData.timerDuration === 90 ? 'selected' : ''}>90s</option>
+          <option value="120" ${lobbyData.timerDuration === 120 ? 'selected' : ''}>2 min</option>
+          <option value="180" ${lobbyData.timerDuration === 180 ? 'selected' : ''}>3 min</option>
+        </select>
       </div>
     </div>
     <button id="startGameBtn" class="btn btn-primary" ${players.length < 2 ? 'disabled' : ''}>
@@ -272,6 +288,11 @@ function renderHostLobbyPage(lobbyCode: string, lobbyData: any) {
   document.getElementById('difficultySelect')?.addEventListener('change', async (e) => {
     const val = (e.target as HTMLSelectElement).value;
     if (currentLobbyId) await updateDoc(doc(db, 'lobbies', currentLobbyId), { difficulty: val });
+  });
+
+  document.getElementById('timerSelect')?.addEventListener('change', async (e) => {
+    const val = parseInt((e.target as HTMLSelectElement).value);
+    if (currentLobbyId) await updateDoc(doc(db, 'lobbies', currentLobbyId), { timerDuration: val });
   });
 
   const saveNameBtn = document.getElementById('saveNameBtn');
@@ -336,6 +357,10 @@ function renderPlayerLobbyPage(lobbyCode: string, lobbyData: any) {
         <span class="setting-label">Difficulty</span>
         <span>${lobbyData.difficulty || 'normal'}</span>
       </div>
+      <div class="setting-row">
+        <span class="setting-label">Timer (per turn)</span>
+        <span>${lobbyData.timerDuration ? lobbyData.timerDuration + 's' : 'Off'}</span>
+      </div>
     </div>
   `;
 
@@ -362,6 +387,9 @@ function renderPlayerLobbyPage(lobbyCode: string, lobbyData: any) {
 // ── Start match — Jean's OOP wired in here ────────────────────────────────────
 
 async function handleStartMatch(firestorePlayers: any[], difficulty: string, lobbyData?: any) {
+  currentTimerDuration = lobbyData?.timerDuration || 0;
+  if (activeTimerInterval) { clearInterval(activeTimerInterval); activeTimerInterval = null; }
+
   // Map Firestore player objects → Jean's Player class instances
   currentPlayers = firestorePlayers.map(
     (p, i) => new Player(p.id, p.name, i === 0)
@@ -419,6 +447,41 @@ async function handleStartMatch(firestorePlayers: any[], difficulty: string, lob
   renderBoard();
 }
 
+// ── Timer helper ──────────────────────────────────────────────────────────────
+
+function stopGuessTimer() {
+  if (activeTimerInterval) { clearInterval(activeTimerInterval); activeTimerInterval = null; }
+}
+
+function startGuessTimer(onExpire: () => void) {
+  stopGuessTimer();
+  if (!currentTimerDuration) return;
+  timerSecondsLeft = currentTimerDuration;
+  activeTimerInterval = setInterval(() => {
+    timerSecondsLeft--;
+    const el = document.getElementById('timerDisplay');
+    if (el) {
+      el.textContent = `⏱ ${timerSecondsLeft}s`;
+      el.style.color = timerSecondsLeft <= 10 ? '#e74c3c' : '#f4d03f';
+    }
+    if (timerSecondsLeft <= 0) {
+      stopGuessTimer();
+      onExpire();
+    }
+  }, 1000);
+}
+
+function autoEndTurn() {
+  if (!currentTurnController || !currentPlayers.length) return;
+  const activePlayer = currentPlayers[currentPlayerIndex];
+  if (activePlayer?.getId() !== auth.currentUser?.uid) return;
+  currentTurnController.endTurn();
+  const currentPlayer = currentPlayers[currentPlayerIndex];
+  currentTurnController.switchTurn(currentPlayer.getId());
+  if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { currentTurnPlayerId: currentPlayer.getId(), clue: null, guessingEnabled: false });
+  renderBoard();
+}
+
 // ── Board render (from Jean) ──────────────────────────────────────────────────
 
 function renderBoard() {
@@ -463,6 +526,7 @@ function renderBoard() {
           currentTurnController!.switchTurn(guesser.getId());
           if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { clue: { word: clue.word, number: clue.number }, guessingEnabled: true, currentTurnPlayerId: guesser.getId() });
           renderBoard();
+          startGuessTimer(autoEndTurn);
         });
       }
     } else {
@@ -472,11 +536,20 @@ function renderBoard() {
       clueDisplay.textContent = `Clue: "${clue.word}" — ${clue.number}`;
       gameContainer.appendChild(clueDisplay);
 
+      if (currentTimerDuration > 0) {
+        const timerEl = document.createElement('div');
+        timerEl.id = 'timerDisplay';
+        timerEl.style.cssText = `text-align:center;font-size:1.4rem;font-weight:bold;color:#f4d03f;padding:4px;`;
+        timerEl.textContent = `⏱ ${timerSecondsLeft > 0 ? timerSecondsLeft : currentTimerDuration}s`;
+        gameContainer.appendChild(timerEl);
+      }
+
       if (isMyTurn) {
         const endTurnBtn = document.createElement('button');
         endTurnBtn.textContent = 'End Turn';
         endTurnBtn.style.cssText = `display:block;margin:0 auto;padding:10px 24px;border-radius:8px;background:#e74c3c;color:#fff;font-weight:bold;border:none;cursor:pointer;`;
         endTurnBtn.addEventListener('click', () => {
+          stopGuessTimer();
           currentTurnController!.endTurn();
           const currentPlayer = currentPlayers[currentPlayerIndex];
           currentTurnController!.switchTurn(currentPlayer.getId());
