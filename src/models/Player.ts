@@ -1,15 +1,15 @@
 export class Player {
   private playerId: string
   private playerName: string
-  private isHost: boolean
-  private connected: boolean
+  private _isHost: boolean
+  private _connected: boolean
   private currentClue: { word: string; number: number } | null = null
 
   constructor(playerId: string, playerName: string, isHost: boolean = false) {
     this.playerId = playerId
     this.playerName = playerName
-    this.isHost = isHost
-    this.connected = true
+    this._isHost = isHost
+    this._connected = true
   }
 
   getId(): string { return this.playerId }

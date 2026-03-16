@@ -1,19 +1,17 @@
-import { CardType } from "./CardType"
-
 export class Card {
 
   private cardId: string
   private word: string
   private cardType: string
   private revealed: boolean
-  private identified: boolean
+  private _identified: boolean
 
   constructor(cardId: string, word: string, cardType: string) {
     this.cardId = cardId
     this.word = word
     this.cardType = cardType
     this.revealed = false
-    this.identified = false
+    this._identified = false
   }
 
   reveal(): void {
@@ -21,7 +19,7 @@ export class Card {
   }
 
   markAsIdentified(): void {
-    this.identified = true
+    this._identified = true
   }
 
   getCardType(): string {

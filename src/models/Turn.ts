@@ -1,20 +1,20 @@
 export class Turn {
 
-  private currentPlayerId: string
+  private _currentPlayerId: string
   private guessingPhaseEnabled: boolean
-  private turnEnded: boolean
+  private _turnEnded: boolean
   private clueWord: string = ''
   private clueNumber: number = 0
 
   constructor(currentPlayerId: string) {
-    this.currentPlayerId = currentPlayerId
+    this._currentPlayerId = currentPlayerId
     this.guessingPhaseEnabled = false
-    this.turnEnded = false
+    this._turnEnded = false
   }
 
   initializeTurn(): void {
     this.guessingPhaseEnabled = false
-    this.turnEnded = false
+    this._turnEnded = false
     this.clueWord = ''
     this.clueNumber = 0
     console.log("Turn initialized")
@@ -39,7 +39,7 @@ export class Turn {
   }
 
   endTurn(): void {
-    this.turnEnded = true
+    this._turnEnded = true
     console.log("Turn ended")
   }
 

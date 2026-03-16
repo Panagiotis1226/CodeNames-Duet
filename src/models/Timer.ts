@@ -1,15 +1,15 @@
 export class Timer {
 
   private duration: number
-  private running: boolean
+  private _running: boolean
 
   constructor() {
     this.duration = 0
-    this.running = false
+    this._running = false
   }
 
   start(): void {
-    this.running = true
+    this._running = true
   }
 
   stop(): void {

@@ -23,6 +23,7 @@ let currentTurnController: TurnController | null = null;
 let currentPlayers: Player[] = [];
 let currentPlayerController: PlayerController | null = null;
 let currentPlayerIndex: number = 0;
+let gameInitialized: boolean = false;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -164,7 +165,12 @@ function listenToLobby(lobbyId: string) {
     if (!currentUser) return;
 
     if (lobbyData.status === 'started') {
-      handleStartMatch(lobbyData.players || [], lobbyData.difficulty || 'normal');
+      if (!gameInitialized) {
+        gameInitialized = true;
+        handleStartMatch(lobbyData.players || [], lobbyData.difficulty || 'normal', lobbyData);
+      } else {
+        syncGameState(lobbyData);
+      }
       return;
     }
 
@@ -172,6 +178,33 @@ function listenToLobby(lobbyId: string) {
     if (isHost) renderHostLobbyPage(lobbyData.code, lobbyData);
     else renderPlayerLobbyPage(lobbyData.code, lobbyData);
   });
+}
+
+function syncGameState(lobbyData: any) {
+  if (!currentGame || !currentTurnController || !currentPlayers.length) return;
+  const board = (currentGame as any).board;
+
+  if (lobbyData.boardCards) {
+    const boardCards: { id: string; revealed: boolean }[] = lobbyData.boardCards;
+    boardCards.forEach(fc => { if (fc.revealed) board.revealCard(fc.id); });
+  }
+
+  if (lobbyData.currentTurnPlayerId) {
+    const idx = currentPlayers.findIndex(p => p.getId() === lobbyData.currentTurnPlayerId);
+    if (idx !== -1 && idx !== currentPlayerIndex) {
+      currentPlayerIndex = idx;
+      currentTurnController.switchTurn(lobbyData.currentTurnPlayerId);
+    }
+  }
+
+  if (lobbyData.guessingEnabled && !currentTurnController.isGuessingEnabled() && lobbyData.clue) {
+    currentTurnController.submitClue(lobbyData.clue.word, lobbyData.clue.number);
+  } else if (!lobbyData.guessingEnabled && currentTurnController.isGuessingEnabled()) {
+    currentTurnController.endTurn();
+    currentTurnController.switchTurn(currentPlayers[currentPlayerIndex].getId());
+  }
+
+  renderBoard();
 }
 
 // ── Host lobby page (from main — untouched, + difficulty wired) ───────────────
@@ -328,7 +361,7 @@ function renderPlayerLobbyPage(lobbyCode: string, lobbyData: any) {
 
 // ── Start match — Jean's OOP wired in here ────────────────────────────────────
 
-function handleStartMatch(firestorePlayers: any[], difficulty: string) {
+async function handleStartMatch(firestorePlayers: any[], difficulty: string, lobbyData?: any) {
   // Map Firestore player objects → Jean's Player class instances
   currentPlayers = firestorePlayers.map(
     (p, i) => new Player(p.id, p.name, i === 0)
@@ -349,7 +382,33 @@ function handleStartMatch(firestorePlayers: any[], difficulty: string) {
 
   // Build Game directly for local rendering
   currentGame = new Game(currentPlayers, difficulty);
-  currentGame.initializeGameData();
+
+  // If Firestore already has board state, restore it; otherwise generate fresh (host only)
+  if (lobbyData?.boardCards) {
+    currentGame.initializeGameData();
+    const board = (currentGame as any).board;
+    lobbyData.boardCards.forEach((fc: any) => {
+      if (fc.revealed) board.revealCard(fc.id);
+    });
+    if (lobbyData.currentTurnPlayerId) {
+      const idx = currentPlayers.findIndex(p => p.getId() === lobbyData.currentTurnPlayerId);
+      if (idx !== -1) currentPlayerIndex = idx;
+    }
+  } else {
+    currentGame.initializeGameData();
+    // Only host writes the initial board to Firestore
+    if (currentLobbyId && auth.currentUser?.uid === host.getId()) {
+      const board = (currentGame as any).board;
+      const cards = (board as any).cards as Card[];
+      await updateDoc(doc(db, 'lobbies', currentLobbyId), {
+        boardCards: cards.map(c => ({ id: c.getId(), word: c.getWord(), type: c.getCardType(), revealed: false })),
+        currentTurnPlayerId: host.getId(),
+        clue: null,
+        guessingEnabled: false
+      });
+    }
+  }
+
   currentGame.setStatus('Created');
   currentGame.startFirstRound();
 
@@ -358,6 +417,10 @@ function handleStartMatch(firestorePlayers: any[], difficulty: string) {
   currentTurnController = new TurnController(turn, currentGame);
   currentTurnController.startTurn(host.getId());
   currentPlayerController = new PlayerController((currentGame as any).board, currentGame);
+
+  if (lobbyData?.guessingEnabled && lobbyData?.clue) {
+    currentTurnController.submitClue(lobbyData.clue.word, lobbyData.clue.number);
+  }
 
   renderBoard();
 }
@@ -399,8 +462,9 @@ function renderBoard() {
           const word = (document.getElementById('clueWord') as HTMLInputElement).value.trim();
           const number = parseInt((document.getElementById('clueNumber') as HTMLInputElement).value);
           if (!word || isNaN(number)) return;
-          const clue = currentPlayers[0].createClue(word, number);
+          const clue = currentPlayers[currentPlayerIndex].createClue(word, number);
           currentTurnController!.submitClue(clue.word, clue.number);
+          if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { clue: { word: clue.word, number: clue.number }, guessingEnabled: true });
           renderBoard();
         });
       }
@@ -420,6 +484,7 @@ function renderBoard() {
           currentPlayerIndex = currentPlayerIndex === 0 ? 1 : 0;
           const nextPlayer = currentPlayers[currentPlayerIndex];
           currentTurnController!.switchTurn(nextPlayer.getId());
+          if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { currentTurnPlayerId: nextPlayer.getId(), clue: null, guessingEnabled: false });
           renderBoard();
         });
         gameContainer.appendChild(endTurnBtn);
@@ -427,7 +492,8 @@ function renderBoard() {
     }
 
     const boardGrid = document.createElement('div');
-    boardGrid.style.cssText = `display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:20px;width:800px;box-sizing:border-box;`;
+    const cols = (board as any).gridSize === 5 ? 5 : 3;
+    boardGrid.style.cssText = `display:grid;grid-template-columns:repeat(${cols},1fr);gap:12px;padding:20px;width:${cols === 5 ? '1000px' : '800px'};box-sizing:border-box;`;
     const canGuess = guessingEnabled && isMyTurn;
     cards.forEach((card: Card) => {
       const el = document.createElement('button');
@@ -438,6 +504,12 @@ function renderBoard() {
         color:${card.isRevealed() ? '#111' : '#fff'};font-weight:bold;cursor:${canGuess ? 'pointer' : 'not-allowed'};min-height:100px;opacity:${canGuess ? '1' : '0.6'};`;
       el.addEventListener('click', () => {
         const result = currentPlayerController!.makeGuess(card.getId());
+        if (currentLobbyId) {
+          const allCards = (board as any).cards as Card[];
+          updateDoc(doc(db, 'lobbies', currentLobbyId), {
+            boardCards: allCards.map(c => ({ id: c.getId(), word: c.getWord(), type: c.getCardType(), revealed: c.isRevealed() }))
+          });
+        }
         if (result === 'win') {
           currentGame!.setStatus('Won');
           currentGame!.endMatch();

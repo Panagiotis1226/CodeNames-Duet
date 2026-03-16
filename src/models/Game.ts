@@ -7,18 +7,18 @@ import { KeyMap } from "./KeyMap"
 
 export class Game {
 
-  private players: Player[]
+  private _players: Player[]
   private board: Board
   private currentTurn: Turn
   private turnCounter: number
   private difficulty: string
   private status: string = 'Created'
-  private hostPlayer: Player | null = null
-  private timer: Timer | null = null
+  private _hostPlayer: Player | null = null
+  private _timer: Timer | null = null
   private keyMap: KeyMap | null = null
 
   constructor(players: Player[], difficulty: string) {
-    this.players = players
+    this._players = players
     this.board = new Board()
     this.currentTurn = new Turn("")
     this.turnCounter = 0
@@ -37,7 +37,7 @@ export class Game {
   }
 
   createTimer(): void {
-    this.timer = new Timer()
+    this._timer = new Timer()
   }
 
   endGuessingPhase(): void {
@@ -46,7 +46,7 @@ export class Game {
   }
 
   assignRoles(players: Player[]): void {
-    this.players = players
+    this._players = players
   }
 
   startFirstRound(): void {
@@ -66,7 +66,7 @@ export class Game {
     return null
   }
 
-  evaluateGuess(card: Card): 'win' | 'loss' | 'continue' {
+  evaluateGuess(_card: Card): 'win' | 'loss' | 'continue' {
     const result = this.checkWinCondition()
     if (result === 'win') return 'win'
     if (result === 'loss') return 'loss'
@@ -87,7 +87,7 @@ export class Game {
   }
 
   associateHost(hostPlayer: Player): void {
-    this.hostPlayer = hostPlayer
+    this._hostPlayer = hostPlayer
   }
 
 }
