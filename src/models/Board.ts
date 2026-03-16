@@ -3,27 +3,51 @@ import { Card } from "./Card"
 export class Board {
 
   private cards: Card[]
+  private gridSize: number
+
+  private wordPool: string[] = [
+    'APPLE', 'MOON', 'TRAIN', 'SHADOW', 'RIVER', 'LIGHT', 'BRIDGE', 'CLOUD', 'STONE',
+    'FIRE', 'WATER', 'FOREST', 'CASTLE', 'SWORD', 'SHIELD', 'CROWN', 'MIRROR',
+    'GHOST', 'TOWER', 'ANCHOR', 'ARROW', 'BARREL', 'CAVE', 'DESERT', 'ENGINE'
+  ]
 
   constructor() {
     this.cards = []
+    this.gridSize = 3
   }
 
-  generateBoard(): void {
-    this.cards = [
-      new Card("1", "APPLE", "GREEN"),
-      new Card("2", "MOON", "NEUTRAL"),
-      new Card("3", "TRAIN", "GREEN"),
-      new Card("4", "SHADOW", "ASSASSIN"),
-      new Card("5", "RIVER", "NEUTRAL"),
-      new Card("6", "LIGHT", "GREEN"),
-      new Card("7", "BRIDGE", "NEUTRAL"),
-      new Card("8", "CLOUD", "GREEN"),
-      new Card("9", "STONE", "NEUTRAL")
+  private shuffle(arr: string[]): string[] {
+    const a = [...arr]
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]]
+    }
+    return a
+  }
+
+  generateBoard(difficulty: string = 'normal'): void {
+    let total: number, green: number, assassin: number
+    if (difficulty === 'easy') {
+      total = 9; green = 3; assassin = 1
+    } else if (difficulty === 'hard') {
+      total = 25; green = 11; assassin = 3
+    } else {
+      total = 25; green = 9; assassin = 3
+    }
+    const neutral = total - green - assassin
+    const words = this.shuffle(this.wordPool).slice(0, total)
+    const types: string[] = [
+      ...Array(green).fill('GREEN'),
+      ...Array(assassin).fill('ASSASSIN'),
+      ...Array(neutral).fill('NEUTRAL')
     ]
+    const shuffledTypes = this.shuffle(types)
+    this.cards = words.map((word, i) => new Card(String(i + 1), word, shuffledTypes[i]))
   }
 
   createGrid(): void {
-    console.log(`Grid created with ${this.cards.length} cards`)
+    this.gridSize = this.cards.length === 9 ? 3 : 5
+    console.log(`Grid created: ${this.gridSize}x${this.gridSize}`)
   }
 
   assignCards(): void {

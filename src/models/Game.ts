@@ -26,7 +26,7 @@ export class Game {
   }
 
   initializeGameData(): void {
-    this.board.generateBoard()
+    this.board.generateBoard(this.difficulty)
     this.board.createGrid()
     this.createTimer()
     const cards = (this.board as any).cards as Card[]
