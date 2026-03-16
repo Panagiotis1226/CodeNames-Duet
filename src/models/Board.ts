@@ -22,8 +22,12 @@ export class Board {
     ]
   }
 
+  getCard(cardId: string): Card | undefined {
+    return this.cards.find((card: any) => card["cardId"] === cardId)
+  }
+
   revealCard(cardId: string): void {
-    const selectedCard = this.cards.find((card: any) => card["cardId"] === cardId)
+    const selectedCard = this.getCard(cardId)
 
     if (selectedCard) {
       selectedCard.reveal()

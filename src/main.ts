@@ -8,6 +8,7 @@ import { RoomController } from './controllers/RoomController';
 import { Game } from './models/Game';
 import { Turn } from './models/Turn';
 import { TurnController } from './controllers/TurnController';
+import { PlayerController } from './controllers/PlayerController';
 
 const app = document.getElementById('app')!;
 const gameContainer = document.getElementById('game-container') as HTMLDivElement;
@@ -19,6 +20,7 @@ let currentRoomController: RoomController | null = null;
 let currentGame: Game | null = null;
 let currentTurnController: TurnController | null = null;
 let currentPlayers: Player[] = [];
+let currentPlayerController: PlayerController | null = null;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -348,6 +350,7 @@ function handleStartMatch(firestorePlayers: any[], difficulty: string) {
   const turn = new Turn(host.getId());
   currentTurnController = new TurnController(turn, currentGame);
   currentTurnController.startTurn(host.getId());
+  currentPlayerController = new PlayerController((currentGame as any).board, currentGame);
 
   renderBoard();
 }
@@ -402,8 +405,7 @@ function renderBoard() {
         background:${card.revealed ? '#f4d03f' : '#16213e'};
         color:${card.revealed ? '#111' : '#fff'};font-weight:bold;cursor:${guessingEnabled ? 'pointer' : 'not-allowed'};min-height:100px;opacity:${guessingEnabled ? '1' : '0.6'};`;
       el.addEventListener('click', () => {
-        board.revealCard(card.cardId);
-        const result = currentGame!.checkWinCondition();
+        const result = currentPlayerController!.makeGuess(card.cardId);
         if (result === 'win') {
           gameContainer.innerHTML = `<div style="text-align:center;padding:60px;color:#2ecc71;font-size:2rem;font-weight:bold;">You Win! All green cards revealed.</div>`;
         } else if (result === 'loss') {

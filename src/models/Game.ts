@@ -1,6 +1,7 @@
 import { Player } from "./Player"
 import { Board } from "./Board"
 import { Turn } from "./Turn"
+import { Card } from "./Card"
 
 export class Game {
 
@@ -41,6 +42,13 @@ export class Game {
     const allGreenRevealed = cards.filter((c: any) => c['cardType'] === 'GREEN').every((c: any) => c['revealed'])
     if (allGreenRevealed) return 'win'
     return null
+  }
+
+  evaluateGuess(card: Card): 'win' | 'loss' | 'continue' {
+    const result = this.checkWinCondition()
+    if (result === 'win') return 'win'
+    if (result === 'loss') return 'loss'
+    return 'continue'
   }
 
 }

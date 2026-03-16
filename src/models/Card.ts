@@ -18,4 +18,8 @@ export class Card {
     this.revealed = true
   }
 
+  getCardType(): string {
+    return this.cardType
+  }
+
 }
