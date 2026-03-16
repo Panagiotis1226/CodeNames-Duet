@@ -185,24 +185,24 @@ function syncGameState(lobbyData: any) {
   const board = (currentGame as any).board;
 
   if (lobbyData.boardCards) {
-    const boardCards: { id: string; revealed: boolean }[] = lobbyData.boardCards;
-    boardCards.forEach(fc => { if (fc.revealed) board.revealCard(fc.id); });
+    board.loadCards(lobbyData.boardCards);
   }
 
   if (lobbyData.currentTurnPlayerId) {
     const idx = currentPlayers.findIndex(p => p.getId() === lobbyData.currentTurnPlayerId);
-    if (idx !== -1 && idx !== currentPlayerIndex) {
-      currentPlayerIndex = idx;
-      currentTurnController.switchTurn(lobbyData.currentTurnPlayerId);
-    }
+    if (idx !== -1) currentPlayerIndex = idx;
   }
 
-  if (lobbyData.guessingEnabled && !currentTurnController.isGuessingEnabled() && lobbyData.clue) {
-    currentTurnController.submitClue(lobbyData.clue.word, lobbyData.clue.number);
+  if (lobbyData.guessingEnabled && lobbyData.clue) {
+    if (!currentTurnController.isGuessingEnabled()) {
+      currentTurnController.submitClue(lobbyData.clue.word, lobbyData.clue.number);
+    }
   } else if (!lobbyData.guessingEnabled && currentTurnController.isGuessingEnabled()) {
     currentTurnController.endTurn();
     currentTurnController.switchTurn(currentPlayers[currentPlayerIndex].getId());
   }
+
+  if (currentGame.getStatus() === 'Ended') return;
 
   renderBoard();
 }
@@ -383,7 +383,8 @@ async function handleStartMatch(firestorePlayers: any[], difficulty: string, lob
   // Build Game directly for local rendering
   currentGame = new Game(currentPlayers, difficulty);
 
-  // If Firestore already has board state, restore it; otherwise generate fresh (host only)
+  // Always initialize first for timer/keymap setup, then load or save board state
+  currentGame.initializeGameData();
   if (lobbyData?.boardCards) {
     const board = (currentGame as any).board;
     board.loadCards(lobbyData.boardCards);
@@ -391,19 +392,15 @@ async function handleStartMatch(firestorePlayers: any[], difficulty: string, lob
       const idx = currentPlayers.findIndex(p => p.getId() === lobbyData.currentTurnPlayerId);
       if (idx !== -1) currentPlayerIndex = idx;
     }
-  } else {
-    currentGame.initializeGameData();
-    // Only host writes the initial board to Firestore
-    if (currentLobbyId && auth.currentUser?.uid === host.getId()) {
-      const board = (currentGame as any).board;
-      const cards = (board as any).cards as Card[];
-      await updateDoc(doc(db, 'lobbies', currentLobbyId), {
-        boardCards: cards.map(c => ({ id: c.getId(), word: c.getWord(), type: c.getCardType(), revealed: false })),
-        currentTurnPlayerId: host.getId(),
-        clue: null,
-        guessingEnabled: false
-      });
-    }
+  } else if (currentLobbyId && auth.currentUser?.uid === host.getId()) {
+    const board = (currentGame as any).board;
+    const cards = (board as any).cards as Card[];
+    await updateDoc(doc(db, 'lobbies', currentLobbyId), {
+      boardCards: cards.map(c => ({ id: c.getId(), word: c.getWord(), type: c.getCardType(), revealed: false })),
+      currentTurnPlayerId: host.getId(),
+      clue: null,
+      guessingEnabled: false
+    });
   }
 
   currentGame.setStatus('Created');
@@ -497,10 +494,13 @@ function renderBoard() {
     cards.forEach((card: Card) => {
       const el = document.createElement('button');
       el.textContent = card.getWord();
+      const type = card.getCardType();
+      const revealedBg = type === 'GREEN' ? '#27ae60' : type === 'ASSASSIN' ? '#e74c3c' : '#bdc3c7';
+      const revealedColor = type === 'NEUTRAL' ? '#111' : '#fff';
       el.disabled = !canGuess;
       el.style.cssText = `padding:24px 12px;border-radius:10px;border:2px solid #4a4a6a;
-        background:${card.isRevealed() ? '#f4d03f' : '#16213e'};
-        color:${card.isRevealed() ? '#111' : '#fff'};font-weight:bold;cursor:${canGuess ? 'pointer' : 'not-allowed'};min-height:100px;opacity:${canGuess ? '1' : '0.6'};`;
+        background:${card.isRevealed() ? revealedBg : '#16213e'};
+        color:${card.isRevealed() ? revealedColor : '#fff'};font-weight:bold;cursor:${canGuess ? 'pointer' : 'not-allowed'};min-height:100px;opacity:${canGuess ? '1' : '0.6'};`;
       el.addEventListener('click', () => {
         const result = currentPlayerController!.makeGuess(card.getId());
         if (currentLobbyId) {
