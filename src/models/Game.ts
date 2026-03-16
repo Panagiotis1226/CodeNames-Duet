@@ -10,6 +10,8 @@ export class Game {
   private currentTurn: Turn
   private turnCounter: number
   private difficulty: string
+  private status: string = 'Created'
+  private hostPlayer: Player | null = null
 
   constructor(players: Player[], difficulty: string) {
     this.players = players
@@ -49,6 +51,23 @@ export class Game {
     if (result === 'win') return 'win'
     if (result === 'loss') return 'loss'
     return 'continue'
+  }
+
+  setStatus(status: string): void {
+    this.status = status
+  }
+
+  getStatus(): string {
+    return this.status
+  }
+
+  endMatch(): void {
+    this.setStatus('Ended')
+    console.log('Match ended')
+  }
+
+  associateHost(hostPlayer: Player): void {
+    this.hostPlayer = hostPlayer
   }
 
 }

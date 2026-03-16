@@ -344,6 +344,7 @@ function handleStartMatch(firestorePlayers: any[], difficulty: string) {
   // Build Game directly for local rendering
   currentGame = new Game(currentPlayers, difficulty);
   currentGame.initializeGameData();
+  currentGame.setStatus('Created');
   currentGame.startFirstRound();
 
   // Start first turn with host as active player
@@ -407,8 +408,12 @@ function renderBoard() {
       el.addEventListener('click', () => {
         const result = currentPlayerController!.makeGuess(card.cardId);
         if (result === 'win') {
+          currentGame!.setStatus('Won');
+          currentGame!.endMatch();
           gameContainer.innerHTML = `<div style="text-align:center;padding:60px;color:#2ecc71;font-size:2rem;font-weight:bold;">You Win! All green cards revealed.</div>`;
         } else if (result === 'loss') {
+          currentGame!.setStatus('Lost');
+          currentGame!.endMatch();
           gameContainer.innerHTML = `<div style="text-align:center;padding:60px;color:#e74c3c;font-size:2rem;font-weight:bold;">Game Over! The assassin was revealed.</div>`;
         } else {
           renderBoard();

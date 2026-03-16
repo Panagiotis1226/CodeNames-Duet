@@ -21,7 +21,9 @@ export class RoomController {
 
   startMatch(hostPlayer: Player): void {
     if (this.room.isHost(hostPlayer) && this.room.hasEnoughPlayers() && !this.room.isMatchStarted()) {
-      this.room.createGame()
+      const game = this.room.createGame()
+      game.associateHost(hostPlayer)
+      game.setStatus('Created')
       this.room.setMatchStarted(true)
       console.log('Match started')
     }
