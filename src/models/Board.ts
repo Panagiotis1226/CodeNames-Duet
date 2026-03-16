@@ -58,6 +58,15 @@ export class Board {
     return this.cards.find(card => card.getId() === cardId)
   }
 
+  loadCards(data: { id: string; word: string; type: string; revealed: boolean }[]): void {
+    this.cards = data.map(d => {
+      const card = new Card(d.id, d.word, d.type)
+      if (d.revealed) card.reveal()
+      return card
+    })
+    this.gridSize = this.cards.length === 9 ? 3 : 5
+  }
+
   revealCard(cardId: string): void {
     const selectedCard = this.getCard(cardId)
     if (selectedCard) {

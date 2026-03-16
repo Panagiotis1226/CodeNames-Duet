@@ -385,11 +385,8 @@ async function handleStartMatch(firestorePlayers: any[], difficulty: string, lob
 
   // If Firestore already has board state, restore it; otherwise generate fresh (host only)
   if (lobbyData?.boardCards) {
-    currentGame.initializeGameData();
     const board = (currentGame as any).board;
-    lobbyData.boardCards.forEach((fc: any) => {
-      if (fc.revealed) board.revealCard(fc.id);
-    });
+    board.loadCards(lobbyData.boardCards);
     if (lobbyData.currentTurnPlayerId) {
       const idx = currentPlayers.findIndex(p => p.getId() === lobbyData.currentTurnPlayerId);
       if (idx !== -1) currentPlayerIndex = idx;
@@ -464,7 +461,10 @@ function renderBoard() {
           if (!word || isNaN(number)) return;
           const clue = currentPlayers[currentPlayerIndex].createClue(word, number);
           currentTurnController!.submitClue(clue.word, clue.number);
-          if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { clue: { word: clue.word, number: clue.number }, guessingEnabled: true });
+          currentPlayerIndex = currentPlayerIndex === 0 ? 1 : 0;
+          const guesser = currentPlayers[currentPlayerIndex];
+          currentTurnController!.switchTurn(guesser.getId());
+          if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { clue: { word: clue.word, number: clue.number }, guessingEnabled: true, currentTurnPlayerId: guesser.getId() });
           renderBoard();
         });
       }
@@ -481,10 +481,9 @@ function renderBoard() {
         endTurnBtn.style.cssText = `display:block;margin:0 auto;padding:10px 24px;border-radius:8px;background:#e74c3c;color:#fff;font-weight:bold;border:none;cursor:pointer;`;
         endTurnBtn.addEventListener('click', () => {
           currentTurnController!.endTurn();
-          currentPlayerIndex = currentPlayerIndex === 0 ? 1 : 0;
-          const nextPlayer = currentPlayers[currentPlayerIndex];
-          currentTurnController!.switchTurn(nextPlayer.getId());
-          if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { currentTurnPlayerId: nextPlayer.getId(), clue: null, guessingEnabled: false });
+          const currentPlayer = currentPlayers[currentPlayerIndex];
+          currentTurnController!.switchTurn(currentPlayer.getId());
+          if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { currentTurnPlayerId: currentPlayer.getId(), clue: null, guessingEnabled: false });
           renderBoard();
         });
         gameContainer.appendChild(endTurnBtn);
