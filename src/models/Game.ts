@@ -2,6 +2,8 @@ import { Player } from "./Player"
 import { Board } from "./Board"
 import { Turn } from "./Turn"
 import { Card } from "./Card"
+import { Timer } from "./Timer"
+import { KeyMap } from "./KeyMap"
 
 export class Game {
 
@@ -12,6 +14,8 @@ export class Game {
   private difficulty: string
   private status: string = 'Created'
   private hostPlayer: Player | null = null
+  private timer: Timer | null = null
+  private keyMap: KeyMap | null = null
 
   constructor(players: Player[], difficulty: string) {
     this.players = players
@@ -23,6 +27,22 @@ export class Game {
 
   initializeGameData(): void {
     this.board.generateBoard()
+    this.board.createGrid()
+    this.createTimer()
+    const cards = (this.board as any).cards as Card[]
+    this.keyMap = new KeyMap()
+    this.keyMap.createKeyMap(cards)
+    this.board.assignCards()
+    this.setStatus('Created')
+  }
+
+  createTimer(): void {
+    this.timer = new Timer()
+  }
+
+  endGuessingPhase(): void {
+    this.currentTurn.endTurn()
+    console.log('Guessing phase ended')
   }
 
   assignRoles(players: Player[]): void {

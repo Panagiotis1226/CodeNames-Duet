@@ -22,13 +22,20 @@ export class Board {
     ]
   }
 
+  createGrid(): void {
+    console.log(`Grid created with ${this.cards.length} cards`)
+  }
+
+  assignCards(): void {
+    console.log(`${this.cards.length} cards assigned to board`)
+  }
+
   getCard(cardId: string): Card | undefined {
-    return this.cards.find((card: any) => card["cardId"] === cardId)
+    return this.cards.find(card => card.getId() === cardId)
   }
 
   revealCard(cardId: string): void {
     const selectedCard = this.getCard(cardId)
-
     if (selectedCard) {
       selectedCard.reveal()
     }
