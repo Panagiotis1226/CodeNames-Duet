@@ -339,7 +339,7 @@ function handleStartMatch(firestorePlayers: any[], difficulty: string) {
   currentRoomController.setDifficulty(difficulty);
 
   // startMatch() calls room.createGame() internally
-  currentRoomController.startMatch();
+  currentRoomController.startMatch(host);
 
   // Build Game directly for local rendering
   currentGame = new Game(currentPlayers, difficulty);

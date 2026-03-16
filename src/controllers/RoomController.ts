@@ -19,9 +19,10 @@ export class RoomController {
     console.log('Difficulty set to:', level)
   }
 
-  startMatch(): void {
-    if (this.room.hasEnoughPlayers() && !this.room.isMatchStarted()) {
+  startMatch(hostPlayer: Player): void {
+    if (this.room.isHost(hostPlayer) && this.room.hasEnoughPlayers() && !this.room.isMatchStarted()) {
       this.room.createGame()
+      this.room.setMatchStarted(true)
       console.log('Match started')
     }
   }

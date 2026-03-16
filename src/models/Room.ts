@@ -46,6 +46,14 @@ export class Room {
     return this.players.length >= 2
   }
 
+  isHost(player: Player): boolean {
+    return player.getId() === this.host.getId()
+  }
+
+  setMatchStarted(value: boolean): void {
+    this.matchStarted = value
+  }
+
   createGame(): Game {
     console.log("Creating game...")
     return new Game(this.players, this.difficulty)
