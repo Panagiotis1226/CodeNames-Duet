@@ -54,6 +54,10 @@ export class Room {
     this.matchStarted = value
   }
 
+  getRoom(): Room {
+    return this
+  }
+
   createGame(): Game {
     console.log("Creating game...")
     return new Game(this.players, this.difficulty)

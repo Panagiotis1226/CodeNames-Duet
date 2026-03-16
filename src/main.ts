@@ -339,6 +339,10 @@ function handleStartMatch(firestorePlayers: any[], difficulty: string) {
   currentRoomController = new RoomController(currentRoom);
   currentRoomController.setDifficulty(difficulty);
 
+  // OOP layer: guest players join the room
+  const guests = currentPlayers.slice(1);
+  guests.forEach(guest => currentRoomController!.joinRoom(guest, 'active'));
+
   // startMatch() calls room.createGame() internally
   currentRoomController.startMatch(host);
 

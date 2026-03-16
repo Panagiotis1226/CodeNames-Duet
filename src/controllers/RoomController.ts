@@ -19,6 +19,20 @@ export class RoomController {
     console.log('Difficulty set to:', level)
   }
 
+  joinRoom(player: Player, inviteCode: string): void {
+    const room = this.room.getRoom()
+    if (room.generateInvitationCode() !== inviteCode) {
+      console.log('Invalid invite code')
+      return
+    }
+    if (room.isMatchStarted()) {
+      console.log('Match already started, cannot join')
+      return
+    }
+    room.addPlayer(player)
+    console.log(`${player.getId()} joined the room`)
+  }
+
   startMatch(hostPlayer: Player): void {
     if (this.room.isHost(hostPlayer) && this.room.hasEnoughPlayers() && !this.room.isMatchStarted()) {
       const game = this.room.createGame()
