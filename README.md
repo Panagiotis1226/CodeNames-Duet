@@ -39,7 +39,7 @@ A web-based two-player implementation of the Codenames Duet board game built wit
 - Landing page with **Create Lobby** and **Join Lobby** options
 - 6-character alphanumeric lobby codes shared between players
 - Real-time lobby updates via Firestore `onSnapshot` — both players see name changes and join events instantly
-- Host can edit difficulty and timer settings; guest sees them live (read-only)
+- Host can edit difficulty, timer, and max turns settings; guest sees them live (read-only)
 - Each player can edit their own display name (up to 15 characters)
 - Start Game button enabled only when both players are present
 
@@ -55,6 +55,7 @@ A web-based two-player implementation of the Codenames Duet board game built wit
 - Clue submission is written to Firestore and triggers the guessing phase on both clients
 - Guessing phase can be ended manually or automatically when the turn timer expires
 - Turn state (active player, clue, guessing phase) is fully synchronised via Firestore
+- Optional **max turns** limit (1–19): game ends with a "Maximum turns reached" screen when the limit is hit
 
 ### Win / Loss Conditions
 - **Win** — all GREEN cards revealed
@@ -107,3 +108,11 @@ Firebase Anonymous Auth persists per browser session, so use one of:
 - Firebase config is excluded from git via `.gitignore`
 - Anonymous auth is used — no account required
 - Firestore rules are currently open (test mode); restrict them before any public deployment
+
+## AI Usage
+
+AI assistance was used for:
+- Writing more structured and consistent code comments
+- Troubleshooting bugs and unexpected behaviour
+- Learning how to implement certain parts of the codebase (e.g. Firestore real-time sync, Firebase Auth)
+- Brainstorming and refining the visual theme and look of the game
