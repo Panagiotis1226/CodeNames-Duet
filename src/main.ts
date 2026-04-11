@@ -48,6 +48,8 @@ let timerSecondsLeft: number = 0;
 let currentTurnNumber: number = 1;
 // Maximum number of turns set by the host in the lobby (0 = no limit)
 let maxTurns: number = 0;
+// Per-player key maps — index 0 = host, 1 = guest. Each map: { [cardId]: 'GREEN'|'NEUTRAL'|'ASSASSIN' }
+let playerKeyMaps: Record<string, string>[] = [];
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 // Signs the user in anonymously if not already authenticated.
@@ -230,6 +232,12 @@ function syncGameState(lobbyData: any) {
   // card positions and revealed states regardless of local RNG
   if (lobbyData.boardCards) {
     board.loadCards(lobbyData.boardCards);
+  }
+
+  // Keep per-player key maps in sync — the guest may not have received them during
+  // handleStartMatch if the host hadn't written them to Firestore yet at that point
+  if (lobbyData.keyMap0 || lobbyData.keyMap1) {
+    playerKeyMaps = [lobbyData.keyMap0 || {}, lobbyData.keyMap1 || {}];
   }
 
   // Keep local currentPlayerIndex in sync with whoever Firestore says is active
@@ -468,6 +476,25 @@ function renderPlayerLobbyPage(lobbyCode: string, lobbyData: any) {
   }
 }
 
+// ── Key map generator ─────────────────────────────────────────────────────────
+// Produces an independent type assignment for a given set of card IDs.
+// Called twice on the host to give each player their own private GREEN layout.
+function generateKeyMap(cardIds: string[], diff: string): Record<string, string> {
+  let green: number, assassin: number;
+  if (diff === 'easy') { green = 3; assassin = 1; }
+  else if (diff === 'hard') { green = 11; assassin = 3; }
+  else { green = 9; assassin = 3; }
+  const neutral = cardIds.length - green - assassin;
+  const types = [...Array(green).fill('GREEN'), ...Array(assassin).fill('ASSASSIN'), ...Array(neutral).fill('NEUTRAL')];
+  for (let i = types.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [types[i], types[j]] = [types[j], types[i]];
+  }
+  const map: Record<string, string> = {};
+  cardIds.forEach((id, i) => { map[id] = types[i]; });
+  return map;
+}
+
 // ── Start match ───────────────────────────────────────────────────────────────
 // Initialises the full OOP game layer and board state when the game begins.
 // The host generates the board and writes it to Firestore; the guest reads it back
@@ -506,24 +533,28 @@ async function handleStartMatch(firestorePlayers: any[], difficulty: string, lob
   currentGame.initializeGameData();
 
   if (lobbyData?.boardCards) {
-    // Guest path: board already exists in Firestore — load it deterministically
-    // so card positions and types match the host exactly
+    // Guest path: board already exists in Firestore — load it without types (playerKeyMaps supplies them)
     const board = (currentGame as any).board;
     board.loadCards(lobbyData.boardCards);
-    // Restore whose turn it was if the game was already in progress
+    // Load both per-player key maps from Firestore
+    playerKeyMaps = [lobbyData.keyMap0 || {}, lobbyData.keyMap1 || {}];
     if (lobbyData.currentTurnPlayerId) {
       const idx = currentPlayers.findIndex(p => p.getId() === lobbyData.currentTurnPlayerId);
       if (idx !== -1) currentPlayerIndex = idx;
     }
-    // Restore the turn number if the game was already in progress
     if (typeof lobbyData.turnNumber === 'number') currentTurnNumber = lobbyData.turnNumber;
   } else if (currentLobbyId && auth.currentUser?.uid === host.getId()) {
-    // Host path: no board in Firestore yet — write the freshly generated board
-    // so the guest can load the same layout via loadCards()
+    // Host path: generate two independent key maps (one per player) and write everything to Firestore
     const board = (currentGame as any).board;
     const cards = (board as any).cards as Card[];
+    const cardIds = cards.map((c: Card) => c.getId());
+    const keyMap0 = generateKeyMap(cardIds, difficulty);
+    const keyMap1 = generateKeyMap(cardIds, difficulty);
+    playerKeyMaps = [keyMap0, keyMap1];
     await updateDoc(doc(db, 'lobbies', currentLobbyId), {
-      boardCards: cards.map(c => ({ id: c.getId(), word: c.getWord(), type: c.getCardType(), revealed: false })),
+      boardCards: cards.map((c: Card) => ({ id: c.getId(), word: c.getWord(), type: 'NEUTRAL', revealed: false })),
+      keyMap0,
+      keyMap1,
       currentTurnPlayerId: host.getId(),
       clue: null,
       guessingEnabled: false,
@@ -626,6 +657,33 @@ function renderBoard() {
     gameContainer.appendChild(turnBanner);
 
     if (!guessingEnabled) {
+      if (isMyTurn) {
+        const refSection = document.createElement('div');
+        refSection.style.cssText = `padding:14px 20px;`;
+        const refTitle = document.createElement('div');
+        refTitle.style.cssText = `text-align:center;color:#a0c4ff;font-size:0.9rem;font-weight:bold;margin-bottom:8px;letter-spacing:0.05em;`;
+        refTitle.textContent = '🗝 YOUR KEY — give clues for the green cards';
+        refSection.appendChild(refTitle);
+
+        const cols = (board as any).gridSize === 5 ? 5 : 3;
+        const refGrid = document.createElement('div');
+        refGrid.style.cssText = `display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px;width:${cols === 5 ? '900px' : '540px'};margin:0 auto;`;
+        cards.forEach((card: Card) => {
+          const type = playerKeyMaps[currentPlayerIndex]?.[card.getId()] ?? 'NEUTRAL';
+          let bg = '#2c2c4e';
+          let color = '#ccc';
+          let border = '2px solid #4a4a6a';
+          if (type === 'GREEN') { bg = card.isRevealed() ? '#1a6b3c' : '#27ae60'; color = '#fff'; border = '2px solid #1e8449'; }
+          else if (type === 'ASSASSIN') { bg = card.isRevealed() ? '#6b1a1a' : '#c0392b'; color = '#fff'; border = '2px solid #a93226'; }
+          const tile = document.createElement('div');
+          tile.style.cssText = `padding:8px 4px;border-radius:6px;border:${border};background:${bg};color:${color};font-size:0.72rem;font-weight:bold;text-align:center;opacity:${card.isRevealed() ? '0.45' : '1'};`;
+          tile.textContent = card.isRevealed() ? '✓' : card.getWord();
+          refGrid.appendChild(tile);
+        });
+        refSection.appendChild(refGrid);
+        gameContainer.appendChild(refSection);
+      }
+
       // Clue phase — show the clue input form; disabled for the non-active player
       const clueForm = document.createElement('div');
       clueForm.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px;`;
@@ -706,10 +764,13 @@ function renderBoard() {
     boardGrid.style.cssText = `display:grid;grid-template-columns:repeat(${cols},1fr);gap:12px;padding:20px;width:${cols === 5 ? '1000px' : '800px'};box-sizing:border-box;`;
     // Cards are only clickable during the guessing phase on the active player's turn
     const canGuess = guessingEnabled && isMyTurn;
+    // During guessing phase, the clue-giver is the other player; use their key map for card colours and win/loss
+    const clueGiverIdx = guessingEnabled ? (currentPlayerIndex === 0 ? 1 : 0) : currentPlayerIndex;
+    const activeKeyMap = playerKeyMaps[clueGiverIdx] ?? {};
     cards.forEach((card: Card) => {
       const el = document.createElement('button');
       el.textContent = card.getWord();
-      const type = card.getCardType();
+      const type = activeKeyMap[card.getId()] ?? 'NEUTRAL';
       // Revealed colour: green for team cards, red for assassin, grey for neutral
       const revealedBg = type === 'GREEN' ? '#27ae60' : type === 'ASSASSIN' ? '#e74c3c' : '#bdc3c7';
       const revealedColor = type === 'NEUTRAL' ? '#111' : '#fff';
@@ -718,28 +779,31 @@ function renderBoard() {
         background:${card.isRevealed() ? revealedBg : '#16213e'};
         color:${card.isRevealed() ? revealedColor : '#fff'};font-weight:bold;cursor:${canGuess ? 'pointer' : 'not-allowed'};min-height:100px;opacity:${canGuess ? '1' : '0.6'};`;
       el.addEventListener('click', () => {
-        // makeGuess() reveals the card locally and returns 'win', 'loss', or 'continue'
-        const result = currentPlayerController!.makeGuess(card.getId());
+        // Reveal the card locally
+        card.reveal();
         // Sync the updated revealed states to Firestore so both clients see the flip
         if (currentLobbyId) {
           const allCards = (board as any).cards as Card[];
           updateDoc(doc(db, 'lobbies', currentLobbyId), {
-            boardCards: allCards.map(c => ({ id: c.getId(), word: c.getWord(), type: c.getCardType(), revealed: c.isRevealed() }))
+            boardCards: allCards.map(c => ({ id: c.getId(), word: c.getWord(), type: 'NEUTRAL', revealed: c.isRevealed() }))
           });
         }
-        if (result === 'win') {
-          // All green cards revealed — end the game with a win screen
-          currentGame!.setStatus('Won');
-          currentGame!.endMatch();
-          gameContainer.innerHTML = `<div style="text-align:center;padding:60px;color:#2ecc71;font-size:2rem;font-weight:bold;">You Win! All green cards revealed.</div>`;
-        } else if (result === 'loss') {
-          // Assassin card revealed — end the game with a loss screen
+        // Evaluate win/loss against the clue-giver's key map
+        const cardType = activeKeyMap[card.getId()] ?? 'NEUTRAL';
+        if (cardType === 'ASSASSIN') {
           currentGame!.setStatus('Lost');
           currentGame!.endMatch();
           gameContainer.innerHTML = `<div style="text-align:center;padding:60px;color:#e74c3c;font-size:2rem;font-weight:bold;">Game Over! The assassin was revealed.</div>`;
         } else {
-          // Normal reveal — re-render the board with the updated card state
-          renderBoard();
+          const greenCards = cards.filter(c => (activeKeyMap[c.getId()] ?? 'NEUTRAL') === 'GREEN');
+          const allGreenRevealed = greenCards.length > 0 && greenCards.every(c => c.isRevealed());
+          if (allGreenRevealed) {
+            currentGame!.setStatus('Won');
+            currentGame!.endMatch();
+            gameContainer.innerHTML = `<div style="text-align:center;padding:60px;color:#2ecc71;font-size:2rem;font-weight:bold;">You Win! All green cards revealed.</div>`;
+          } else {
+            renderBoard();
+          }
         }
       });
       boardGrid.appendChild(el);
