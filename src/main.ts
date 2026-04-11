@@ -1,11 +1,7 @@
-// Firebase services — db for Firestore, auth for anonymous authentication
 import { db, auth } from './firebase';
-// Firestore helpers used throughout for reading and writing lobby/game state
 import { collection, addDoc, doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
-// Anonymous sign-in so players don't need accounts
 import { signInAnonymously } from 'firebase/auth';
 
-// OOP model and controller layer (Jean's classes)
 import { Player } from './models/Player';
 import { Room } from './models/Room';
 import { RoomController } from './controllers/RoomController';
@@ -15,45 +11,33 @@ import { TurnController } from './controllers/TurnController';
 import { PlayerController } from './controllers/PlayerController';
 import { Card } from './models/Card';
 
-// Top-level DOM containers — app holds lobby/home UI, gameContainer holds the board
 const app = document.getElementById('app')!;
 const gameContainer = document.getElementById('game-container') as HTMLDivElement;
 
-// Firestore listener cleanup — called before attaching a new onSnapshot to avoid duplicate listeners
+// cleanup handle — replaced before each new onSnapshot to avoid duplicate listeners
 let currentLobbyUnsubscribe: (() => void) | null = null;
-// Firestore document ID of the active lobby
 let currentLobbyId: string | null = null;
-// OOP Room and RoomController instances (Jean's layer)
 let currentRoom: Room | null = null;
 let currentRoomController: RoomController | null = null;
-// Game instance used for local board state and status tracking
 let currentGame: Game | null = null;
-// Controls turn lifecycle (clue submission, guessing phase, end turn)
 let currentTurnController: TurnController | null = null;
-// Ordered player list — index 0 is always the host
+// index 0 = host
 let currentPlayers: Player[] = [];
-// Handles card guess logic and win/loss evaluation
 let currentPlayerController: PlayerController | null = null;
-// Index into currentPlayers pointing to whose turn it currently is
 let currentPlayerIndex: number = 0;
-// Guard to ensure handleStartMatch only runs once per game session
+// guard so handleStartMatch only runs once per game
 let gameInitialized: boolean = false;
-// Timer duration in seconds set by host in lobby (0 = timer off)
+// 0 = timer off
 let currentTimerDuration: number = 0;
-// Reference to the active setInterval countdown so it can be cleared
 let activeTimerInterval: ReturnType<typeof setInterval> | null = null;
-// Tracks how many seconds remain in the current guessing countdown
 let timerSecondsLeft: number = 0;
-// Tracks the current turn number — increments each time a guessing phase ends
 let currentTurnNumber: number = 1;
-// Maximum number of turns set by the host in the lobby (0 = no limit)
+// 0 = no limit
 let maxTurns: number = 0;
-// Per-player key maps — index 0 = host, 1 = guest. Each map: { [cardId]: 'GREEN'|'NEUTRAL'|'ASSASSIN' }
+// index 0 = host key map, 1 = guest key map; each: { [cardId]: 'GREEN'|'NEUTRAL'|'ASSASSIN' }
 let playerKeyMaps: Record<string, string>[] = [];
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-// Signs the user in anonymously if not already authenticated.
-// Anonymous auth gives each player a stable uid for the session without requiring an account.
+// Signs in anonymously if not already authenticated.
 async function initAuth() {
   try {
     if (auth.currentUser) return;
@@ -64,8 +48,7 @@ async function initAuth() {
   }
 }
 
-// ── Lobby code generator ──────────────────────────────────────────────────────
-// Produces a random 6-character alphanumeric code that the host shares with their partner.
+// Random 6-character alphanumeric code the host shares with their partner.
 function generateLobbyCode(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let code = '';
@@ -73,9 +56,7 @@ function generateLobbyCode(): string {
   return code;
 }
 
-// ── Home page ─────────────────────────────────────────────────────────────────
-// Renders the landing screen with a Create Lobby button and a Join Lobby input.
-// Also clears any leftover board HTML from a previous game.
+// Landing screen with Create Lobby and Join Lobby. Clears any leftover board HTML.
 function renderHomePage() {
   app.innerHTML = `
     <h1 class="home-title">CODENAMES</h1>
@@ -562,18 +543,14 @@ async function handleStartMatch(firestorePlayers: any[], difficulty: string, lob
     });
   }
 
-  // Advance game to active state and kick off the first round
   currentGame.setStatus('Created');
   currentGame.startFirstRound();
 
-  // Create the Turn / TurnController for the host as first clue giver
   const turn = new Turn(host.getId());
   currentTurnController = new TurnController(turn, currentGame);
   currentTurnController.startTurn(host.getId());
-  // PlayerController handles makeGuess() calls and win/loss evaluation
   currentPlayerController = new PlayerController((currentGame as any).board, currentGame);
 
-  // If the game snapshot already has an active clue, enter guessing phase immediately
   if (lobbyData?.guessingEnabled && lobbyData?.clue) {
     currentTurnController.submitClue(lobbyData.clue.word, lobbyData.clue.number);
   }
@@ -581,15 +558,10 @@ async function handleStartMatch(firestorePlayers: any[], difficulty: string, lob
   renderBoard();
 }
 
-// ── Timer helpers ─────────────────────────────────────────────────────────────
-// stopGuessTimer clears the active countdown interval so the timer stops ticking.
 function stopGuessTimer() {
   if (activeTimerInterval) { clearInterval(activeTimerInterval); activeTimerInterval = null; }
 }
 
-// startGuessTimer begins a 1-second countdown from currentTimerDuration.
-// Updates the #timerDisplay element each tick and calls onExpire when it reaches 0.
-// No-ops if the host set the timer to 0 (off).
 function startGuessTimer(onExpire: () => void) {
   stopGuessTimer();
   if (!currentTimerDuration) return;
@@ -599,7 +571,6 @@ function startGuessTimer(onExpire: () => void) {
     const el = document.getElementById('timerDisplay');
     if (el) {
       el.textContent = `⏱ ${timerSecondsLeft}s`;
-      // Turn the timer red in the last 10 seconds as a warning
       el.style.color = timerSecondsLeft <= 10 ? '#e74c3c' : '#f4d03f';
     }
     if (timerSecondsLeft <= 0) {
@@ -609,19 +580,14 @@ function startGuessTimer(onExpire: () => void) {
   }, 1000);
 }
 
-// ── Auto end turn ─────────────────────────────────────────────────────────────
-// Called when the guess timer expires. Only fires a Firestore write if this client
-// is the active guesser, preventing duplicate writes from both clients.
 function autoEndTurn() {
   if (!currentTurnController || !currentPlayers.length) return;
   const activePlayer = currentPlayers[currentPlayerIndex];
-  // Guard: only the guesser whose timer ran out should write to Firestore
   if (activePlayer?.getId() !== auth.currentUser?.uid) return;
   currentTurnController.endTurn();
   currentTurnNumber++;
   const currentPlayer = currentPlayers[currentPlayerIndex];
   currentTurnController.switchTurn(currentPlayer.getId());
-  // Write the turn switch to Firestore so the other player's client picks it up
   if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { currentTurnPlayerId: currentPlayer.getId(), clue: null, guessingEnabled: false, turnNumber: currentTurnNumber });
   if (maxTurns > 0 && currentTurnNumber > maxTurns) {
     currentGame!.setStatus('Ended');
@@ -632,11 +598,6 @@ function autoEndTurn() {
   renderBoard();
 }
 
-// ── Board render ──────────────────────────────────────────────────────────────
-// Rebuilds the entire game UI from scratch on every state change.
-// Renders: turn banner, clue form (clue phase) or clue display + timer + End Turn (guessing phase),
-// then the card grid. Card clicks trigger makeGuess(), sync the board to Firestore,
-// and check for win/loss conditions.
 function renderBoard() {
   if (!currentGame || !currentTurnController) return;
   const board = (currentGame as any).board;
@@ -649,7 +610,6 @@ function renderBoard() {
     const activePlayer = currentPlayers[currentPlayerIndex];
     const isMyTurn = activePlayer?.getId() === auth.currentUser?.uid;
 
-    // Turn banner — green for your turn, dark for the opponent's turn
     const turnBanner = document.createElement('div');
     turnBanner.style.cssText = `text-align:center;padding:10px;color:#fff;font-size:1.1rem;font-weight:bold;background:${isMyTurn ? '#27ae60' : '#4a4a6a'};border-radius:8px;margin:10px 20px;`;
     const turnLabel = maxTurns > 0 ? `Turn ${currentTurnNumber} / ${maxTurns}` : `Turn ${currentTurnNumber}`;
@@ -684,7 +644,6 @@ function renderBoard() {
         gameContainer.appendChild(refSection);
       }
 
-      // Clue phase — show the clue input form; disabled for the non-active player
       const clueForm = document.createElement('div');
       clueForm.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px;`;
       clueForm.innerHTML = `
@@ -702,28 +661,23 @@ function renderBoard() {
           const word = (document.getElementById('clueWord') as HTMLInputElement).value.trim();
           const number = parseInt((document.getElementById('clueNumber') as HTMLInputElement).value);
           if (!word || isNaN(number)) return;
-          // Record the clue locally via the Player model then submit to TurnController
           const clue = currentPlayers[currentPlayerIndex].createClue(word, number);
           currentTurnController!.submitClue(clue.word, clue.number);
-          // Switch to the other player as guesser
           currentPlayerIndex = currentPlayerIndex === 0 ? 1 : 0;
           const guesser = currentPlayers[currentPlayerIndex];
           currentTurnController!.switchTurn(guesser.getId());
-          // Broadcast clue and turn switch to Firestore so the other client enters guessing phase
           if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { clue: { word: clue.word, number: clue.number }, guessingEnabled: true, currentTurnPlayerId: guesser.getId() });
           renderBoard();
           startGuessTimer(autoEndTurn);
         });
       }
     } else {
-      // Guessing phase — display the active clue word and number
       const clue = currentTurnController.getClue();
       const clueDisplay = document.createElement('div');
       clueDisplay.style.cssText = `text-align:center;padding:10px;color:#f4d03f;font-size:1.2rem;font-weight:bold;`;
       clueDisplay.textContent = `Clue: "${clue.word}" — ${clue.number}`;
       gameContainer.appendChild(clueDisplay);
 
-      // Show countdown timer if host configured one
       if (currentTimerDuration > 0) {
         const timerEl = document.createElement('div');
         timerEl.id = 'timerDisplay';
@@ -732,7 +686,6 @@ function renderBoard() {
         gameContainer.appendChild(timerEl);
       }
 
-      // End Turn button — only rendered for the active guesser
       if (isMyTurn) {
         const endTurnBtn = document.createElement('button');
         endTurnBtn.textContent = 'End Turn';
@@ -741,10 +694,8 @@ function renderBoard() {
           stopGuessTimer();
           currentTurnController!.endTurn();
           currentTurnNumber++;
-          // Keep the current player as the next clue giver (they just finished guessing)
           const currentPlayer = currentPlayers[currentPlayerIndex];
           currentTurnController!.switchTurn(currentPlayer.getId());
-          // Broadcast the turn end to Firestore
           if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { currentTurnPlayerId: currentPlayer.getId(), clue: null, guessingEnabled: false, turnNumber: currentTurnNumber });
           if (maxTurns > 0 && currentTurnNumber > maxTurns) {
             currentGame!.setStatus('Ended');
@@ -758,20 +709,16 @@ function renderBoard() {
       }
     }
 
-    // Card grid — columns determined by board difficulty (5 for normal/hard, 3 for easy)
     const boardGrid = document.createElement('div');
     const cols = (board as any).gridSize === 5 ? 5 : 3;
     boardGrid.style.cssText = `display:grid;grid-template-columns:repeat(${cols},1fr);gap:12px;padding:20px;width:${cols === 5 ? '1000px' : '800px'};box-sizing:border-box;`;
-    // Cards are only clickable during the guessing phase on the active player's turn
     const canGuess = guessingEnabled && isMyTurn;
-    // During guessing phase, the clue-giver is the other player; use their key map for card colours and win/loss
     const clueGiverIdx = guessingEnabled ? (currentPlayerIndex === 0 ? 1 : 0) : currentPlayerIndex;
     const activeKeyMap = playerKeyMaps[clueGiverIdx] ?? {};
     cards.forEach((card: Card) => {
       const el = document.createElement('button');
       el.textContent = card.getWord();
       const type = activeKeyMap[card.getId()] ?? 'NEUTRAL';
-      // Revealed colour: green for team cards, red for assassin, grey for neutral
       const revealedBg = type === 'GREEN' ? '#27ae60' : type === 'ASSASSIN' ? '#e74c3c' : '#bdc3c7';
       const revealedColor = type === 'NEUTRAL' ? '#111' : '#fff';
       el.disabled = !canGuess;
@@ -779,16 +726,13 @@ function renderBoard() {
         background:${card.isRevealed() ? revealedBg : '#16213e'};
         color:${card.isRevealed() ? revealedColor : '#fff'};font-weight:bold;cursor:${canGuess ? 'pointer' : 'not-allowed'};min-height:100px;opacity:${canGuess ? '1' : '0.6'};`;
       el.addEventListener('click', () => {
-        // Reveal the card locally
         card.reveal();
-        // Sync the updated revealed states to Firestore so both clients see the flip
         if (currentLobbyId) {
           const allCards = (board as any).cards as Card[];
           updateDoc(doc(db, 'lobbies', currentLobbyId), {
             boardCards: allCards.map(c => ({ id: c.getId(), word: c.getWord(), type: 'NEUTRAL', revealed: c.isRevealed() }))
           });
         }
-        // Evaluate win/loss against the clue-giver's key map
         const cardType = activeKeyMap[card.getId()] ?? 'NEUTRAL';
         if (cardType === 'ASSASSIN') {
           currentGame!.setStatus('Lost');
@@ -812,7 +756,5 @@ function renderBoard() {
   }
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-// Entry point — sign the user in anonymously then render the home screen.
 function init() { initAuth(); renderHomePage(); }
 init();

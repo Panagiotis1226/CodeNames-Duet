@@ -1,5 +1,4 @@
-// Game is the central model that owns the board, players, turn counter,
-// difficulty, status, timer, and key map for one match session.
+// Central model for one match: owns the board, players, turn counter, difficulty, status, timer, and key map.
 import { Player } from "./Player"
 import { Board } from "./Board"
 import { Turn } from "./Turn"
@@ -9,18 +8,16 @@ import { KeyMap } from "./KeyMap"
 
 export class Game {
 
-  // Core game state
   private _players: Player[]
   private board: Board
   private currentTurn: Turn
   private turnCounter: number
   private difficulty: string
-  // Lifecycle status: 'Created' → active play → 'Won' / 'Lost' → 'Ended'
+  // lifecycle: 'Created' → active play → 'Won' / 'Lost' → 'Ended'
   private status: string = 'Created'
   private _hostPlayer: Player | null = null
-  // Timer instance — duration is set from the lobby timerDuration setting
   private _timer: Timer | null = null
-  // KeyMap provides fast card-id → type lookups without iterating the board
+  // O(1) card-id → type lookup without iterating the board
   private keyMap: KeyMap | null = null
 
   constructor(players: Player[], difficulty: string) {
@@ -31,7 +28,6 @@ export class Game {
     this.difficulty = difficulty
   }
 
-  // Initialization and Setup
   // Sets up the board, grid, timer, and key map — must be called before the game starts
   initializeGameData(): void {
     this.board.generateBoard(this.difficulty)
@@ -49,14 +45,13 @@ export class Game {
     this._timer = new Timer()
   }
 
-  // Turn and Round Management
-  // Ends the current guessing phase via the Turn model — used by the OOP layer
+  // Ends the current guessing phase via the Turn model
   endGuessingPhase(): void {
     this.currentTurn.endTurn()
     console.log('Guessing phase ended')
   }
 
-  // Replaces the player list — used when roles need to be reassigned mid-session
+  // Replaces the player list
   assignRoles(players: Player[]): void {
     this._players = players
   }
@@ -66,16 +61,12 @@ export class Game {
     this.turnCounter = 1
   }
 
-  // Increments the turn counter each time a turn starts or switches
+  // Increments the turn counter
   updateTurnCounter(): void {
     this.turnCounter++
   }
 
-  // Win/Loss Evaluation
-  // Checks board state for win/loss conditions:
-  // loss — any ASSASSIN card has been revealed
-  // win — all GREEN cards have been revealed
-  // null — game is still in progress
+  // loss if any ASSASSIN is revealed; win if all GREEN cards are revealed; null otherwise
   checkWinCondition(): 'win' | 'loss' | null {
     const cards = (this.board as any).cards as Card[]
     const assassinRevealed = cards.some(c => c.getCardType() === 'ASSASSIN' && c.isRevealed())
@@ -85,7 +76,7 @@ export class Game {
     return null
   }
 
-  // Evaluates a guess result after a card has been revealed — delegates to checkWinCondition
+  // Evaluates a guess result after a card has been revealed
   evaluateGuess(_card: Card): 'win' | 'loss' | 'continue' {
     const result = this.checkWinCondition()
     if (result === 'win') return 'win'
@@ -93,24 +84,22 @@ export class Game {
     return 'continue'
   }
 
-  // Status Management
-  // Updates the game lifecycle status string
   setStatus(status: string): void {
     this.status = status
   }
 
-  // Returns the current status — used by syncGameState to guard win/loss screens
+  // Used by syncGameState to guard win/loss screens
   getStatus(): string {
     return this.status
   }
 
-  // Finalises the match by setting status to 'Ended' — called after win or loss
+  // Sets status to 'Ended' — called after win or loss
   endMatch(): void {
     this.setStatus('Ended')
     console.log('Match ended')
   }
 
-  // Records which player is the host — used by RoomController.startMatch()
+  // Records the host player — used by RoomController.startMatch()
   associateHost(hostPlayer: Player): void {
     this._hostPlayer = hostPlayer
   }
