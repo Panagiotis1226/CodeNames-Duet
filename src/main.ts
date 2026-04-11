@@ -44,6 +44,10 @@ let currentTimerDuration: number = 0;
 let activeTimerInterval: ReturnType<typeof setInterval> | null = null;
 // Tracks how many seconds remain in the current guessing countdown
 let timerSecondsLeft: number = 0;
+// Tracks the current turn number — increments each time a guessing phase ends
+let currentTurnNumber: number = 1;
+// Maximum number of turns set by the host in the lobby (0 = no limit)
+let maxTurns: number = 0;
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 // Signs the user in anonymously if not already authenticated.
@@ -234,6 +238,11 @@ function syncGameState(lobbyData: any) {
     if (idx !== -1) currentPlayerIndex = idx;
   }
 
+  // Sync the turn number from Firestore
+  if (typeof lobbyData.turnNumber === 'number') {
+    currentTurnNumber = lobbyData.turnNumber;
+  }
+
   // Transition into guessing phase when the other client submitted a clue
   if (lobbyData.guessingEnabled && lobbyData.clue) {
     const wasGuessing = currentTurnController.isGuessingEnabled();
@@ -254,6 +263,14 @@ function syncGameState(lobbyData: any) {
 
   // Don't overwrite a win/loss screen if the game is already over
   if (currentGame.getStatus() === 'Ended') return;
+
+  // Check if max turns exceeded on this client (driven by Firestore turnNumber sync)
+  if (maxTurns > 0 && currentTurnNumber > maxTurns) {
+    currentGame.setStatus('Ended');
+    currentGame.endMatch();
+    gameContainer.innerHTML = `<div style="text-align:center;padding:60px;color:#f4d03f;font-size:2rem;font-weight:bold;">Game Over! Maximum turns reached.</div>`;
+    return;
+  }
 
   renderBoard();
 }
@@ -317,6 +334,10 @@ function renderHostLobbyPage(lobbyCode: string, lobbyData: any) {
           <option value="180" ${lobbyData.timerDuration === 180 ? 'selected' : ''}>3 min</option>
         </select>
       </div>
+      <div class="setting-row">
+        <span class="setting-label">Max Turns</span>
+        <input type="number" id="maxTurnsInput" min="1" max="19" value="${lobbyData.maxTurns || ''}" placeholder="No limit" style="padding:6px 10px;border-radius:6px;border:2px solid #4a4a6a;background:#16213e;color:#fff;font-size:1rem;width:90px;" />
+      </div>
     </div>
     <button id="startGameBtn" class="btn btn-primary" ${players.length < 2 ? 'disabled' : ''}>
       ${players.length < 2 ? 'Waiting for Player...' : 'Start Game'}
@@ -341,6 +362,13 @@ function renderHostLobbyPage(lobbyCode: string, lobbyData: any) {
   document.getElementById('timerSelect')?.addEventListener('change', async (e) => {
     const val = parseInt((e.target as HTMLSelectElement).value);
     if (currentLobbyId) await updateDoc(doc(db, 'lobbies', currentLobbyId), { timerDuration: val });
+  });
+
+  // Max turns change — validate 1–19 and write to Firestore; empty input clears the limit
+  document.getElementById('maxTurnsInput')?.addEventListener('change', async (e) => {
+    const raw = parseInt((e.target as HTMLInputElement).value);
+    const val = (!isNaN(raw) && raw >= 1 && raw <= 19) ? raw : null;
+    if (currentLobbyId) await updateDoc(doc(db, 'lobbies', currentLobbyId), { maxTurns: val });
   });
 
   // Name save — fetches the current players array, patches this user's name, and writes it back
@@ -412,6 +440,10 @@ function renderPlayerLobbyPage(lobbyCode: string, lobbyData: any) {
         <span class="setting-label">Timer (per turn)</span>
         <span>${lobbyData.timerDuration ? lobbyData.timerDuration + 's' : 'Off'}</span>
       </div>
+      <div class="setting-row">
+        <span class="setting-label">Max Turns</span>
+        <span>${lobbyData.maxTurns ? lobbyData.maxTurns : 'No limit'}</span>
+      </div>
     </div>
   `;
 
@@ -443,6 +475,9 @@ function renderPlayerLobbyPage(lobbyCode: string, lobbyData: any) {
 async function handleStartMatch(firestorePlayers: any[], difficulty: string, lobbyData?: any) {
   // Store the timer duration set in the lobby (0 means no timer)
   currentTimerDuration = lobbyData?.timerDuration || 0;
+  // Store the max turns set by the host in the lobby (0 = no limit)
+  maxTurns = lobbyData?.maxTurns || 0;
+  currentTurnNumber = 1;
   // Clear any stale timer from a previous game
   if (activeTimerInterval) { clearInterval(activeTimerInterval); activeTimerInterval = null; }
 
@@ -480,6 +515,8 @@ async function handleStartMatch(firestorePlayers: any[], difficulty: string, lob
       const idx = currentPlayers.findIndex(p => p.getId() === lobbyData.currentTurnPlayerId);
       if (idx !== -1) currentPlayerIndex = idx;
     }
+    // Restore the turn number if the game was already in progress
+    if (typeof lobbyData.turnNumber === 'number') currentTurnNumber = lobbyData.turnNumber;
   } else if (currentLobbyId && auth.currentUser?.uid === host.getId()) {
     // Host path: no board in Firestore yet — write the freshly generated board
     // so the guest can load the same layout via loadCards()
@@ -489,7 +526,8 @@ async function handleStartMatch(firestorePlayers: any[], difficulty: string, lob
       boardCards: cards.map(c => ({ id: c.getId(), word: c.getWord(), type: c.getCardType(), revealed: false })),
       currentTurnPlayerId: host.getId(),
       clue: null,
-      guessingEnabled: false
+      guessingEnabled: false,
+      turnNumber: 1
     });
   }
 
@@ -549,10 +587,17 @@ function autoEndTurn() {
   // Guard: only the guesser whose timer ran out should write to Firestore
   if (activePlayer?.getId() !== auth.currentUser?.uid) return;
   currentTurnController.endTurn();
+  currentTurnNumber++;
   const currentPlayer = currentPlayers[currentPlayerIndex];
   currentTurnController.switchTurn(currentPlayer.getId());
   // Write the turn switch to Firestore so the other player's client picks it up
-  if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { currentTurnPlayerId: currentPlayer.getId(), clue: null, guessingEnabled: false });
+  if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { currentTurnPlayerId: currentPlayer.getId(), clue: null, guessingEnabled: false, turnNumber: currentTurnNumber });
+  if (maxTurns > 0 && currentTurnNumber > maxTurns) {
+    currentGame!.setStatus('Ended');
+    currentGame!.endMatch();
+    gameContainer.innerHTML = `<div style="text-align:center;padding:60px;color:#f4d03f;font-size:2rem;font-weight:bold;">Game Over! Maximum turns reached.</div>`;
+    return;
+  }
   renderBoard();
 }
 
@@ -576,7 +621,8 @@ function renderBoard() {
     // Turn banner — green for your turn, dark for the opponent's turn
     const turnBanner = document.createElement('div');
     turnBanner.style.cssText = `text-align:center;padding:10px;color:#fff;font-size:1.1rem;font-weight:bold;background:${isMyTurn ? '#27ae60' : '#4a4a6a'};border-radius:8px;margin:10px 20px;`;
-    turnBanner.textContent = `${activePlayer?.getId() ?? 'Unknown'}'s Turn${isMyTurn ? ' (You)' : ''}`;
+    const turnLabel = maxTurns > 0 ? `Turn ${currentTurnNumber} / ${maxTurns}` : `Turn ${currentTurnNumber}`;
+    turnBanner.textContent = `${turnLabel} — ${activePlayer?.getId() ?? 'Unknown'}${isMyTurn ? ' (You)' : ''}`;
     gameContainer.appendChild(turnBanner);
 
     if (!guessingEnabled) {
@@ -636,11 +682,18 @@ function renderBoard() {
         endTurnBtn.addEventListener('click', () => {
           stopGuessTimer();
           currentTurnController!.endTurn();
+          currentTurnNumber++;
           // Keep the current player as the next clue giver (they just finished guessing)
           const currentPlayer = currentPlayers[currentPlayerIndex];
           currentTurnController!.switchTurn(currentPlayer.getId());
           // Broadcast the turn end to Firestore
-          if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { currentTurnPlayerId: currentPlayer.getId(), clue: null, guessingEnabled: false });
+          if (currentLobbyId) updateDoc(doc(db, 'lobbies', currentLobbyId), { currentTurnPlayerId: currentPlayer.getId(), clue: null, guessingEnabled: false, turnNumber: currentTurnNumber });
+          if (maxTurns > 0 && currentTurnNumber > maxTurns) {
+            currentGame!.setStatus('Ended');
+            currentGame!.endMatch();
+            gameContainer.innerHTML = `<div style="text-align:center;padding:60px;color:#f4d03f;font-size:2rem;font-weight:bold;">Game Over! Maximum turns reached.</div>`;
+            return;
+          }
           renderBoard();
         });
         gameContainer.appendChild(endTurnBtn);
